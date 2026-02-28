@@ -128,6 +128,55 @@ def _():
     assert len(d["steps"]) == 2
     assert d["score"] == 0.9
 
+@test("convert_log_to_trace pairs action→outcome correctly (ReAct)")
+def _():
+    from memory.episodic_log import EpisodicLog, convert_log_to_trace
+    ep = EpisodicLog(task="What is 2+3?", strategy="react")
+    ep.log_step("thought", "I should use the calculator")
+    ep.log_step("action", "calculator: 2+3")
+    ep.log_step("observation", "5")
+    ep.log_step("thought", "I have the answer")
+    ep.log_step("finish", "The answer is 5")
+    ep.finish(result="The answer is 5", score=0.8)
+    trace = convert_log_to_trace(ep, task_id="test-react")
+    assert trace.task_id == "test-react"
+    assert trace.strategy == "react"
+    assert trace.success is True
+    assert trace.score == 0.8
+    # thought→(no outcome), action→observation, thought→finish = 3 trace steps
+    assert len(trace.steps) == 3
+    # Second step should pair action→observation
+    assert "calculator" in trace.steps[1].action
+    assert "5" in trace.steps[1].outcome
+
+@test("convert_log_to_trace handles single-thought CoT")
+def _():
+    from memory.episodic_log import EpisodicLog, convert_log_to_trace
+    ep = EpisodicLog(task="Explain gravity", strategy="cot")
+    ep.log_step("thought", "Using CoT")
+    ep.log_step("finish", "Gravity is a force")
+    ep.finish(result="Gravity is a force", score=0.6)
+    trace = convert_log_to_trace(ep)
+    assert len(trace.steps) == 1
+    assert trace.success is True
+    assert trace.task_id  # auto-generated
+
+@test("EpisodicTrace serializes to dict")
+def _():
+    from memory.episodic_log import EpisodicLog, convert_log_to_trace
+    ep = EpisodicLog(task="test", strategy="cot")
+    ep.log_step("thought", "think")
+    ep.log_step("finish", "done")
+    ep.finish(result="done", score=0.9)
+    trace = convert_log_to_trace(ep, task_id="ser-test")
+    d = trace.to_dict()
+    assert d["task_id"] == "ser-test"
+    assert d["success"] is True
+    assert len(d["steps"]) == 1
+    assert "state" in d["steps"][0]
+    assert "action" in d["steps"][0]
+    assert "outcome" in d["steps"][0]
+
 
 # ── 3. Skills ─────────────────────────────────────────────────────────
 print("\n[Skills]")
