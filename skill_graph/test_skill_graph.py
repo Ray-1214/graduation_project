@@ -221,25 +221,25 @@ def _():
     assert abs(g.compute_entropy()) < 1e-9
 
 
-@test("entropy of uniform distribution = log₂(n)")
+@test("entropy of uniform distribution = ln(n)")
 def _():
     g = SkillGraph()
     n = 4
     for i in range(n):
         g.add_skill(make_skill(f"s{i}", utility=1.0))
-    expected = math.log2(n)  # 2.0
+    expected = math.log(n)  # ln(4) ≈ 1.386
     actual = g.compute_entropy()
     assert abs(actual - expected) < 1e-9, f"Expected {expected}, got {actual}"
 
 
-@test("entropy of skewed distribution < log₂(n)")
+@test("entropy of skewed distribution < ln(n)")
 def _():
     g = SkillGraph()
     g.add_skill(make_skill("dominant", utility=10.0))
     g.add_skill(make_skill("weak1", utility=0.1))
     g.add_skill(make_skill("weak2", utility=0.1))
     h = g.compute_entropy()
-    max_h = math.log2(3)
+    max_h = math.log(3)
     assert 0 < h < max_h, f"Expected 0 < {h} < {max_h}"
 
 
