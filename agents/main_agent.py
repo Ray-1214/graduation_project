@@ -31,6 +31,8 @@ from skills.calculator import Calculator
 from skills.file_ops import FileOps
 from skills.registry import SkillRegistry
 from skills.web_search import WebSearch
+from skills.admin_query import AdminQuery
+from rag.knowledge_store import KnowledgeStore
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +77,15 @@ class MainAgent:
             top_k=self.config.retrieval_top_k,
         )
 
+        # Knowledge
+        self.knowledge_store = KnowledgeStore(use_vectors=False)
+
         # Skills
         self.skills = SkillRegistry()
         self.skills.register(Calculator())
         self.skills.register(FileOps())
-        self.skills.register(WebSearch())
+        self.skills.register(WebSearch(knowledge_store=self.knowledge_store))
+        self.skills.register(AdminQuery(knowledge_store=self.knowledge_store))
 
         # Reasoning strategies
         self.planner = StrategyPlanner()
