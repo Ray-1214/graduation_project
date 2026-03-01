@@ -183,9 +183,10 @@ class SkillGraph:
     def compute_entropy(self) -> float:
         """Compute structural entropy H(G_t).
 
-        H(G_t) = −Σ_{σ∈Σ} p(σ) log₂ p(σ)
+        H(G_t) = −Σ_{σ∈Σ} p(σ) ln p(σ)
 
         where p(σ) = U(σ) / Σ U(σ')  (normalised utility).
+        Uses natural logarithm (ln) per the formal definition.
 
         Skills with U ≤ 0 are excluded.  Returns 0.0 for an empty
         graph or when all utilities are ≤ 0.
@@ -203,7 +204,7 @@ class SkillGraph:
         for u in utilities:
             p = u / total
             if p > 0:
-                entropy -= p * math.log2(p)
+                entropy -= p * math.log(p)
         return entropy
 
     # ── Structural capacity ──────────────────────────────────────────
@@ -250,11 +251,20 @@ class SkillGraph:
 
     # ── Snapshot ─────────────────────────────────────────────────────
 
-    def snapshot(self) -> Dict[str, Any]:
-        """Export the full graph state as a serialisable dict."""
+    def snapshot(self, partition: Any = None) -> Dict[str, Any]:
+        """Export the full graph state as a serialisable dict.
+
+        Args:
+            partition: Optional ``MemoryPartition`` instance.  When
+                       provided each node dict includes a ``"tier"``
+                       field (``"active"`` / ``"cold"`` / ``"archive"``).
+        """
         nodes = []
         for nid, data in self._graph.nodes(data=True):
-            nodes.append(data["skill"].to_dict())
+            node_dict = data["skill"].to_dict()
+            if partition is not None:
+                node_dict["tier"] = partition.get_tier(nid)
+            nodes.append(node_dict)
 
         edges = []
         for u, v, data in self._graph.edges(data=True):
@@ -265,7 +275,6 @@ class SkillGraph:
                 "edge_type": data.get("edge_type", "co_occurrence"),
             })
 
-        active = self.get_active_skills(threshold=0.0)
         return {
             "timestamp": time.time(),
             "num_skills": len(self._graph),

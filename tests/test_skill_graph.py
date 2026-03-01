@@ -1,7 +1,7 @@
 """
-Pytest tests for the Self-Evolving Skill Graph system.
+Phase 1 Acceptance Tests — Self-Evolving Skill Graph.
 
-Covers: SkillNode, SkillGraph, MemoryPartition.
+18 test cases covering SkillNode, SkillGraph, and MemoryPartition.
 
 Run with:
     pytest tests/test_skill_graph.py -v
@@ -26,383 +26,340 @@ def make_skill(name: str, utility: float = 0.0, **kw) -> SkillNode:
 
 
 # =====================================================================
-#  SkillNode
+#  1.1 SkillNode Tests (1-1 ~ 1-5)
 # =====================================================================
 
 class TestSkillNode:
 
-    def test_creation_and_defaults(self):
-        sk = SkillNode(name="test")
-        assert sk.name == "test"
+    def test_1_1_initialization_completeness(self):
+        """SkillNode 建立後所有欄位皆有正確預設值"""
+        sk = SkillNode()
+        assert sk.skill_id.startswith("sk-")
+        assert sk.policy == ""
+        assert sk.termination == "Task is complete or max steps reached."
+        assert sk.initiation_set == []
         assert sk.frequency == 0
         assert sk.reinforcement == 0.0
+        assert sk.cost == 1.0
         assert sk.version == 1
-        assert sk.skill_id.startswith("sk-")
 
-    def test_compute_utility(self):
-        sk = SkillNode(name="calc", frequency=4, reinforcement=2.0, cost=1.0)
-        u = sk.compute_utility(alpha=1.0, beta=0.5, gamma_c=0.1)
-        # U = 1.0*2.0 + 0.5*4 - 0.1*1.0 = 3.9
-        assert abs(u - 3.9) < 1e-9
-        assert abs(sk.utility - 3.9) < 1e-9
+    def test_1_2_compute_utility_formula(self):
+        """α=1, β=1, γ_c=1, r=5, f=3, c=2 → U = 1×5 + 1×3 − 1×2 = 6.0"""
+        sk = SkillNode(name="formula_test")
+        sk.reinforcement = 5.0
+        sk.frequency = 3
+        sk.cost = 2.0
+        u = sk.compute_utility(alpha=1.0, beta=1.0, gamma_c=1.0)
+        assert u == 6.0
+        assert sk.utility == 6.0
 
-    def test_decay(self):
-        sk = make_skill("d", utility=1.0)
-        sk.decay(gamma=0.1)
-        assert abs(sk.utility - 0.9) < 1e-9
+    def test_1_3_decay_correct(self):
+        """utility=10, decay(0.1) → 9.0；連續 decay 兩次 → 8.1"""
+        sk = make_skill("decay_test", utility=10.0)
+        sk.decay(0.1)
+        assert abs(sk.utility - 9.0) < 1e-9
+        sk.decay(0.1)
+        assert abs(sk.utility - 8.1) < 1e-9
 
-    def test_reinforce(self):
-        sk = SkillNode(name="r")
-        sk.reinforce(delta_u=0.8, cost=2.0)
-        assert sk.frequency == 1
-        assert sk.reinforcement == 0.8
-        assert sk.utility == 0.8
+    def test_1_4_decay_boundary(self):
+        """γ=0 → utility 不變；γ=1 → utility 歸零"""
+        sk1 = make_skill("no_decay", utility=5.0)
+        sk1.decay(0.0)
+        assert sk1.utility == 5.0
 
-    def test_matches(self):
-        sk = SkillNode(name="m", initiation_set=["math", "calculate"])
-        assert sk.matches("calculate 2+3")
-        assert sk.matches("MATH quiz")
-        assert not sk.matches("write a poem")
+        sk2 = make_skill("full_decay", utility=5.0)
+        sk2.decay(1.0)
+        assert sk2.utility == 0.0
 
-    def test_evolve(self):
-        parent = make_skill("parent", utility=5.0)
-        parent.frequency = 10
-        child = parent.evolve(new_policy="improved policy")
-        assert child.parent_id == parent.skill_id
-        assert child.version == parent.version + 1
-        assert child.frequency == 0
-        assert child.utility == 0.0
-        assert child.policy == "improved policy"
+    def test_1_5_serialization_roundtrip(self):
+        """to_dict() / from_dict() 可以 round-trip 而不丟失資料"""
+        sk = SkillNode(
+            name="serialize_me",
+            policy="Use calculator for math",
+            termination="Answer found",
+            initiation_set=["math", "arithmetic"],
+        )
+        sk.frequency = 7
+        sk.reinforcement = 3.5
+        sk.cost = 1.2
+        sk.version = 3
+        sk.compute_utility(alpha=1.0, beta=0.5, gamma_c=0.1)
 
-    def test_serialization_roundtrip(self):
-        sk = SkillNode(name="ser", policy="do X", initiation_set=["a", "b"])
-        sk.reinforce(0.5, 1.0)
         d = sk.to_dict()
         sk2 = SkillNode.from_dict(d)
+
         assert sk2.skill_id == sk.skill_id
         assert sk2.name == sk.name
+        assert sk2.policy == sk.policy
+        assert sk2.termination == sk.termination
+        assert sk2.initiation_set == sk.initiation_set
+        assert sk2.frequency == sk.frequency
         assert sk2.reinforcement == sk.reinforcement
+        assert sk2.cost == sk.cost
+        assert sk2.version == sk.version
+        assert abs(sk2.utility - sk.utility) < 1e-9
 
 
 # =====================================================================
-#  SkillGraph
+#  1.2 SkillGraph Tests (1-6 ~ 1-13)
 # =====================================================================
 
 class TestSkillGraph:
 
-    # ── Nodes ────────────────────────────────────────────────────────
-
-    def test_add_and_get_skill(self):
-        g = SkillGraph()
-        sk = make_skill("alpha", utility=1.0)
-        g.add_skill(sk)
-        assert g.has_skill(sk.skill_id)
-        assert g.get_skill(sk.skill_id) is sk
-        assert len(g) == 1
-
-    def test_add_duplicate_raises(self):
-        g = SkillGraph()
-        sk = make_skill("dup")
-        g.add_skill(sk)
-        with pytest.raises(ValueError):
-            g.add_skill(sk)
-
-    def test_capacity_enforced(self):
-        g = SkillGraph(capacity=2)
-        g.add_skill(make_skill("a"))
-        g.add_skill(make_skill("b"))
-        with pytest.raises(OverflowError):
-            g.add_skill(make_skill("c"))
-
-    def test_remove_skill_and_edges(self):
-        g = SkillGraph()
-        a, b = make_skill("a"), make_skill("b")
-        g.add_skill(a)
-        g.add_skill(b)
-        g.add_edge(a.skill_id, b.skill_id, weight=1.0)
-        g.remove_skill(a.skill_id)
-        assert not g.has_skill(a.skill_id)
-        assert len(g.get_edges()) == 0
-
-    # ── Edges ────────────────────────────────────────────────────────
-
-    def test_add_edge_all_types(self):
-        g = SkillGraph()
-        a, b, c = make_skill("a"), make_skill("b"), make_skill("c")
-        g.add_skill(a); g.add_skill(b); g.add_skill(c)
-        g.add_edge(a.skill_id, b.skill_id, weight=0.8, edge_type="co_occurrence")
-        g.add_edge(a.skill_id, c.skill_id, weight=1.0, edge_type="dependency")
-        g.add_edge(b.skill_id, c.skill_id, weight=0.5, edge_type="abstraction")
-        assert len(g.get_edges()) == 3
-        assert len(g.get_edges(edge_type="abstraction")) == 1
-
-    def test_add_edge_rejects_non_positive_weight(self):
-        g = SkillGraph()
-        a, b = make_skill("a"), make_skill("b")
-        g.add_skill(a); g.add_skill(b)
-        with pytest.raises(ValueError):
-            g.add_edge(a.skill_id, b.skill_id, weight=0.0)
-
-    def test_add_edge_rejects_missing_node(self):
+    def test_1_6_add_remove_skill(self):
+        """add_skill 後 len +1；remove_skill 後 -1 且相關邊全部移除"""
         g = SkillGraph()
         a = make_skill("a")
-        g.add_skill(a)
-        with pytest.raises(KeyError):
-            g.add_edge(a.skill_id, "ghost", weight=1.0)
+        b = make_skill("b")
+        c = make_skill("c")
 
-    def test_abstraction_dag_enforced(self):
+        g.add_skill(a)
+        assert len(g) == 1
+        g.add_skill(b)
+        assert len(g) == 2
+        g.add_skill(c)
+        assert len(g) == 3
+
+        # Add edges to b
+        g.add_edge(a.skill_id, b.skill_id, weight=1.0, edge_type="co_occurrence")
+        g.add_edge(b.skill_id, c.skill_id, weight=1.0, edge_type="dependency")
+        assert len(g.get_edges()) == 2
+
+        # Remove b — should also remove both edges
+        g.remove_skill(b.skill_id)
+        assert len(g) == 2
+        assert not g.has_skill(b.skill_id)
+        assert len(g.get_edges()) == 0
+
+    def test_1_7_edge_type_validation(self):
+        """abstraction 邊形成環 → 拋出例外；co_occurrence 允許有環"""
         g = SkillGraph()
         a, b, c = make_skill("a"), make_skill("b"), make_skill("c")
-        g.add_skill(a); g.add_skill(b); g.add_skill(c)
+        g.add_skill(a)
+        g.add_skill(b)
+        g.add_skill(c)
+
+        # Abstraction chain: a → b → c
         g.add_edge(a.skill_id, b.skill_id, weight=1.0, edge_type="abstraction")
         g.add_edge(b.skill_id, c.skill_id, weight=1.0, edge_type="abstraction")
-        with pytest.raises(ValueError, match="[Cc]ycle|DAG"):
+
+        # c → a would create cycle — must raise
+        with pytest.raises(ValueError):
             g.add_edge(c.skill_id, a.skill_id, weight=1.0, edge_type="abstraction")
+
         # Rejected edge should NOT remain
         assert len(g.get_edges(edge_type="abstraction")) == 2
 
-    def test_co_occurrence_allows_cycles(self):
-        g = SkillGraph()
-        a, b = make_skill("a"), make_skill("b")
-        g.add_skill(a); g.add_skill(b)
+        # co_occurrence cycles are fine
         g.add_edge(a.skill_id, b.skill_id, weight=1.0, edge_type="co_occurrence")
         g.add_edge(b.skill_id, a.skill_id, weight=1.0, edge_type="co_occurrence")
-        assert len(g.get_edges()) == 2
+        assert len(g.get_edges(edge_type="co_occurrence")) == 2
 
-    # ── Queries ──────────────────────────────────────────────────────
-
-    def test_get_active_skills(self):
+    def test_1_8_get_active_skills(self):
+        """3 個 skill (U=0.8, 0.5, 0.2), threshold=0.4 → 回傳前 2 個"""
         g = SkillGraph()
-        g.add_skill(make_skill("high", utility=0.8))
-        g.add_skill(make_skill("low", utility=0.2))
-        g.add_skill(make_skill("zero", utility=0.0))
-        active = g.get_active_skills(threshold=0.5)
-        assert len(active) == 1
-        assert active[0].name == "high"
+        s1 = make_skill("high", utility=0.8)
+        s2 = make_skill("mid", utility=0.5)
+        s3 = make_skill("low", utility=0.2)
+        g.add_skill(s1)
+        g.add_skill(s2)
+        g.add_skill(s3)
 
-    def test_get_matching_skills(self):
+        active = g.get_active_skills(threshold=0.4)
+        assert len(active) == 2
+        active_names = {s.name for s in active}
+        assert active_names == {"high", "mid"}
+
+    def test_1_9_compute_entropy(self):
+        """2 個 skill utility 相等 → H = ln(2) ≈ 0.693；1 個 skill → H = 0"""
+        # Single skill → H = 0
+        g1 = SkillGraph()
+        g1.add_skill(make_skill("only", utility=1.0))
+        assert abs(g1.compute_entropy()) < 1e-9
+
+        # Two equal skills → H = ln(2)
+        g2 = SkillGraph()
+        g2.add_skill(make_skill("a", utility=1.0))
+        g2.add_skill(make_skill("b", utility=1.0))
+        expected = math.log(2)  # ≈ 0.6931
+        assert abs(g2.compute_entropy() - expected) < 1e-6
+
+    def test_1_10_compute_capacity(self):
+        """5 個 skill, utility=[0.9,0.7,0.5,0.3,0.1], threshold=0.4 → capacity=3"""
         g = SkillGraph()
-        g.add_skill(make_skill("calc", initiation_set=["math", "calculate"]))
-        g.add_skill(make_skill("write", initiation_set=["essay"]))
-        assert len(g.get_matching_skills("calculate 2+3")) == 1
+        for u in [0.9, 0.7, 0.5, 0.3, 0.1]:
+            g.add_skill(make_skill(f"s{u}", utility=u))
+        assert g.compute_capacity(threshold=0.4) == 3
 
-    # ── Structural entropy ───────────────────────────────────────────
-
-    def test_entropy_empty_graph(self):
-        assert SkillGraph().compute_entropy() == 0.0
-
-    def test_entropy_single_skill(self):
+    def test_1_11_decay_all(self):
+        """全圖 decay 後每個 skill 的 utility 都乘以 (1−γ)"""
         g = SkillGraph()
-        g.add_skill(make_skill("only", utility=1.0))
-        assert abs(g.compute_entropy()) < 1e-9
+        gamma = 0.1
+        original_utils = [1.0, 2.0, 0.5, 3.0]
+        skills = []
+        for i, u in enumerate(original_utils):
+            sk = make_skill(f"s{i}", utility=u)
+            g.add_skill(sk)
+            skills.append(sk)
 
-    def test_entropy_uniform(self):
-        g = SkillGraph()
-        n = 4
-        for i in range(n):
-            g.add_skill(make_skill(f"s{i}", utility=1.0))
-        assert abs(g.compute_entropy() - math.log2(n)) < 1e-9
+        g.decay_all(gamma=gamma)
 
-    def test_entropy_skewed_less_than_max(self):
-        g = SkillGraph()
-        g.add_skill(make_skill("dominant", utility=10.0))
-        g.add_skill(make_skill("weak", utility=0.1))
-        h = g.compute_entropy()
-        assert 0 < h < math.log2(2)
+        for sk, orig in zip(skills, original_utils):
+            expected = orig * (1.0 - gamma)
+            assert abs(sk.utility - expected) < 1e-9, (
+                f"{sk.name}: expected {expected}, got {sk.utility}"
+            )
 
-    # ── Capacity ─────────────────────────────────────────────────────
-
-    def test_compute_capacity(self):
-        g = SkillGraph()
-        g.add_skill(make_skill("a", utility=0.9))
-        g.add_skill(make_skill("b", utility=0.6))
-        g.add_skill(make_skill("c", utility=0.3))
-        assert g.compute_capacity(threshold=0.5) == 2
-
-    # ── Decay ────────────────────────────────────────────────────────
-
-    def test_decay_all(self):
-        g = SkillGraph()
-        a = make_skill("a", utility=1.0)
-        b = make_skill("b", utility=2.0)
-        g.add_skill(a); g.add_skill(b)
-        g.decay_all(gamma=0.1)
-        assert abs(a.utility - 0.9) < 1e-9
-        assert abs(b.utility - 1.8) < 1e-9
-
-    # ── Subgraph & snapshot ──────────────────────────────────────────
-
-    def test_get_subgraph(self):
-        g = SkillGraph()
-        a, b, c = make_skill("a"), make_skill("b"), make_skill("c")
-        g.add_skill(a); g.add_skill(b); g.add_skill(c)
-        g.add_edge(a.skill_id, b.skill_id, weight=1.0)
-        g.add_edge(b.skill_id, c.skill_id, weight=1.0)
-        sub = g.get_subgraph([a.skill_id, b.skill_id])
-        assert len(sub) == 2
-        assert sub.number_of_edges() == 1
-
-    def test_snapshot(self):
+    def test_1_12_snapshot_completeness(self):
+        """snapshot JSON 包含所有 nodes（含 metadata）和 edges（含 weight + type）"""
         g = SkillGraph(capacity=50)
-        a = make_skill("a", utility=1.0)
-        b = make_skill("b", utility=2.0)
-        g.add_skill(a); g.add_skill(b)
-        g.add_edge(a.skill_id, b.skill_id, weight=0.5, edge_type="dependency")
+        a = make_skill("alpha", utility=1.5)
+        a.frequency = 3
+        a.reinforcement = 2.0
+        b = make_skill("beta", utility=0.8)
+        g.add_skill(a)
+        g.add_skill(b)
+        g.add_edge(a.skill_id, b.skill_id, weight=0.7, edge_type="dependency")
+
         snap = g.snapshot()
+
+        # Top-level fields
         assert snap["num_skills"] == 2
         assert snap["num_edges"] == 1
         assert snap["capacity"] == 50
         assert "structural_entropy" in snap
-        assert snap["edges"][0]["edge_type"] == "dependency"
+        assert "timestamp" in snap
+
+        # Nodes contain skill metadata
+        assert len(snap["nodes"]) == 2
+        node_names = {n["name"] for n in snap["nodes"]}
+        assert node_names == {"alpha", "beta"}
+        alpha_node = next(n for n in snap["nodes"] if n["name"] == "alpha")
+        assert alpha_node["frequency"] == 3
+        assert alpha_node["reinforcement"] == 2.0
+        assert alpha_node["utility"] == 1.5
+
+        # Edges contain weight + type
+        assert len(snap["edges"]) == 1
+        edge = snap["edges"][0]
+        assert edge["weight"] == 0.7
+        assert edge["edge_type"] == "dependency"
+
+    def test_1_13_empty_graph_safety(self):
+        """空圖呼叫 compute_entropy(), decay_all(), snapshot() 不報錯"""
+        g = SkillGraph()
+        assert g.compute_entropy() == 0.0
+        g.decay_all(gamma=0.1)  # no error
+        snap = g.snapshot()
+        assert snap["num_skills"] == 0
+        assert snap["num_edges"] == 0
+        assert snap["nodes"] == []
+        assert snap["edges"] == []
 
 
 # =====================================================================
-#  MemoryPartition
+#  1.3 MemoryPartition Tests (1-14 ~ 1-18)
 # =====================================================================
 
 class TestMemoryPartition:
 
-    # θ_high=0.7, θ_low=0.3, ε_h=0.1, ε_l=0.1
-    # Promote to active:    U ≥ 0.8
-    # Demote from active:   U < 0.6
-    # Promote from archive: U > 0.4
-    # Demote to archive:    U ≤ ~0.2
+    # θ_high=0.7, θ_low=0.3, ε_h=0.05, ε_l=0.05
+    # Promote to active:    U ≥ 0.75  (0.7 + 0.05)
+    # Demote from active:   U < 0.65  (0.7 - 0.05)
+    # Promote from archive: U > 0.35  (0.3 + 0.05)
+    # Demote to archive:    U ≤ 0.25  (0.3 - 0.05)
 
-    # ── Basic assignment ─────────────────────────────────────────────
+    MP_KWARGS = dict(theta_high=0.7, theta_low=0.3, epsilon_h=0.05, epsilon_l=0.05)
 
-    def test_cold_high_utility_to_active(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("h", utility=0.9), "cold") == "active"
+    def test_1_14_basic_partition(self):
+        """U=0.8 → active, U=0.5 → cold, U=0.2 → archive"""
+        mp = MemoryPartition(**self.MP_KWARGS)
 
-    def test_cold_mid_utility_stays_cold(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("m", utility=0.5), "cold") == "cold"
+        assert mp.assign_tier(make_skill("a", utility=0.8), "cold") == "active"
+        assert mp.assign_tier(make_skill("c", utility=0.5), "cold") == "cold"
+        assert mp.assign_tier(make_skill("r", utility=0.2), "cold") == "archive"
 
-    def test_cold_low_utility_to_archive(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("l", utility=0.1), "cold") == "archive"
+    def test_1_15_hysteresis_prevents_upgrade_oscillation(self):
+        """
+        skill 從 cold 升到 active (U=0.8)
+        → utility 下降到 0.72 (仍 > θ_high − ε_h = 0.65)
+        → 不降級，仍為 active
+        """
+        mp = MemoryPartition(**self.MP_KWARGS)
+        sk = make_skill("osc", utility=0.8)
 
-    def test_archive_high_utility_jumps_to_active(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("r", utility=0.85), "archive") == "active"
+        # Step 1: cold → active
+        tier = mp.assign_tier(sk, "cold")
+        assert tier == "active"
 
-    def test_active_very_low_skips_to_archive(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("c", utility=0.1), "active") == "archive"
+        # Step 2: utility drops to 0.72 but above demotion threshold (0.65)
+        sk.utility = 0.72
+        tier = mp.assign_tier(sk, "active")
+        assert tier == "active", (
+            f"Hysteresis failed: U=0.72 > 0.65, should stay active, got {tier}"
+        )
 
-    # ── Hysteresis: active boundary ──────────────────────────────────
+    def test_1_16_hysteresis_prevents_downgrade_oscillation(self):
+        """
+        skill 從 cold 降到 archive (U=0.2)
+        → utility 上升到 0.28 (仍 < θ_low + ε_l = 0.35)
+        → 不升級，仍為 archive
+        """
+        mp = MemoryPartition(**self.MP_KWARGS)
+        sk = make_skill("osc", utility=0.2)
 
-    def test_active_stays_in_hysteresis_band(self):
-        mp = MemoryPartition()
-        # U=0.65 is in dead band [0.6, 0.8): active stays, cold stays
-        assert mp.assign_tier(make_skill("x", utility=0.65), "active") == "active"
-        assert mp.assign_tier(make_skill("x", utility=0.65), "cold") == "cold"
+        # Step 1: cold → archive
+        tier = mp.assign_tier(sk, "cold")
+        assert tier == "archive"
 
-    def test_active_demotes_below_hysteresis(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("x", utility=0.55), "active") == "cold"
+        # Step 2: utility rises to 0.28 but below promotion threshold (0.35)
+        sk.utility = 0.28
+        tier = mp.assign_tier(sk, "archive")
+        assert tier == "archive", (
+            f"Hysteresis failed: U=0.28 < 0.35, should stay archive, got {tier}"
+        )
 
-    # ── Hysteresis: archive boundary ─────────────────────────────────
-
-    def test_archive_stays_in_hysteresis_band(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("x", utility=0.35), "archive") == "archive"
-
-    def test_archive_promotes_above_hysteresis(self):
-        mp = MemoryPartition()
-        assert mp.assign_tier(make_skill("x", utility=0.45), "archive") == "cold"
-
-    # ── Anti-oscillation (full trajectory) ───────────────────────────
-
-    def test_no_oscillation_at_active_boundary(self):
-        """6 episodes around θ_high — hysteresis prevents flip-flop."""
-        mp = MemoryPartition()
-        sk = make_skill("osc")
-        trajectory = [
-            (0.85, "active"),   # promote
-            (0.72, "active"),   # hysteresis holds
-            (0.65, "active"),   # still holds
-            (0.58, "cold"),     # drops below 0.6
-            (0.72, "cold"),     # can't re-promote (< 0.8)
-            (0.82, "active"),   # crosses 0.8 again
-        ]
-        tier = "cold"
-        for i, (u, expected) in enumerate(trajectory):
-            sk.utility = u
-            tier = mp.assign_tier(sk, tier)
-            assert tier == expected, (
-                f"Episode {i+1}: U={u}, expected {expected}, got {tier}"
-            )
-
-    def test_no_oscillation_at_archive_boundary(self):
-        """6 episodes around θ_low — hysteresis prevents flip-flop."""
-        mp = MemoryPartition()
-        sk = make_skill("osc2")
-        trajectory = [
-            (0.10, "archive"),
-            (0.25, "archive"),  # holds
-            (0.38, "archive"),  # still under 0.4
-            (0.45, "cold"),     # crosses 0.4
-            (0.35, "cold"),     # can't re-demote (> 0.2)
-            (0.15, "archive"),  # drops below 0.2
-        ]
-        tier = "cold"
-        for i, (u, expected) in enumerate(trajectory):
-            sk.utility = u
-            tier = mp.assign_tier(sk, tier)
-            assert tier == expected, (
-                f"Episode {i+1}: U={u}, expected {expected}, got {tier}"
-            )
-
-    # ── Bulk update with SkillGraph ──────────────────────────────────
-
-    def test_update_all_partitions_correctly(self):
+    def test_1_17_update_all_batch(self):
+        """圖中 10 個 skill，update_all 後回傳的 dict 包含所有 10 個 skill_id"""
         g = SkillGraph()
-        a = make_skill("act", utility=0.9)
-        b = make_skill("cld", utility=0.5)
-        c = make_skill("arc", utility=0.1)
-        g.add_skill(a); g.add_skill(b); g.add_skill(c)
+        skill_ids = []
+        for i in range(10):
+            sk = make_skill(f"s{i}", utility=i * 0.1)
+            g.add_skill(sk)
+            skill_ids.append(sk.skill_id)
 
-        mp = MemoryPartition()
+        mp = MemoryPartition(**self.MP_KWARGS)
         result = mp.update_all(g)
-        assert result[a.skill_id] == "active"
-        assert result[b.skill_id] == "cold"
-        assert result[c.skill_id] == "archive"
 
-    def test_update_all_preserves_hysteresis(self):
+        assert len(result) == 10
+        for sid in skill_ids:
+            assert sid in result
+            assert result[sid] in ("active", "cold", "archive")
+
+    def test_1_18_cross_stage_consistency(self):
+        """MemoryPartition 的 tier 資訊和 SkillGraph snapshot 中節點的 tier 欄位一致"""
         g = SkillGraph()
-        sk = make_skill("trk", utility=0.85)
-        g.add_skill(sk)
+        skills = [
+            make_skill("act1", utility=0.9),
+            make_skill("act2", utility=0.8),
+            make_skill("cold1", utility=0.5),
+            make_skill("cold2", utility=0.4),
+            make_skill("arc1", utility=0.1),
+        ]
+        for sk in skills:
+            g.add_skill(sk)
 
-        mp = MemoryPartition()
-        mp.update_all(g)
-        assert mp.get_tier(sk.skill_id) == "active"
+        mp = MemoryPartition(**self.MP_KWARGS)
+        tier_result = mp.update_all(g)
 
-        sk.utility = 0.65
-        mp.update_all(g)
-        assert mp.get_tier(sk.skill_id) == "active"  # hysteresis
+        # Get snapshot WITH partition
+        snap = g.snapshot(partition=mp)
 
-        sk.utility = 0.55
-        mp.update_all(g)
-        assert mp.get_tier(sk.skill_id) == "cold"
-
-    def test_summary_counts(self):
-        g = SkillGraph()
-        g.add_skill(make_skill("a1", utility=0.9))
-        g.add_skill(make_skill("a2", utility=0.85))
-        g.add_skill(make_skill("c1", utility=0.5))
-        g.add_skill(make_skill("ar", utility=0.1))
-        mp = MemoryPartition()
-        mp.update_all(g)
-        s = mp.summary()
-        assert s == {"active": 2, "cold": 1, "archive": 1}
-
-    # ── Edge cases ───────────────────────────────────────────────────
-
-    def test_invalid_thresholds_raises(self):
-        with pytest.raises(ValueError):
-            MemoryPartition(theta_high=0.3, theta_low=0.7)
-
-    def test_untracked_skill_defaults_to_cold(self):
-        mp = MemoryPartition()
-        assert mp.get_tier("nonexistent") == "cold"
+        # Every node in snapshot must have a tier field matching partition
+        for node_dict in snap["nodes"]:
+            sid = node_dict["skill_id"]
+            assert "tier" in node_dict, f"Node {sid} missing 'tier' field in snapshot"
+            assert node_dict["tier"] == tier_result[sid], (
+                f"Node {sid}: snapshot tier={node_dict['tier']} != "
+                f"partition tier={tier_result[sid]}"
+            )

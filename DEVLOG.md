@@ -254,3 +254,69 @@ experiments/    ██████████ run_experiment, smoke_test (19/19
 - [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
 - [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）
 
+---
+
+## 2026-03-01 — Phase 1 驗收測試通過
+
+### 修改內容
+- 重寫 `tests/test_skill_graph.py`：精確對應 18 項驗收標準（1-1 ~ 1-18）
+- 修改 `skill_graph/skill_graph.py`：
+  - `compute_entropy()` 從 log₂ 改為 ln（自然對數），符合 H = −Σ p log p 定義
+  - `snapshot()` 新增可選 `partition` 參數，傳入時每個 node dict 包含 `tier` 欄位
+
+### 🔴 遇到的問題
+- **Entropy 底數不符**：原本用 log₂（H=1.0 for 2 skills），但驗收標準期望 ln（H=0.693）
+  - 解決：改用 `math.log()` 取代 `math.log2()`
+- **跨階段一致性**（test 1-18）：原 `snapshot()` 不含 tier 資訊
+  - 解決：`snapshot(partition=mp)` 時自動在 node dict 注入 `tier` 欄位
+
+### 測試結果
+```
+18 passed in 0.07s
+```
+
+| 編號 | 測試項目 | 結果 |
+|------|----------|------|
+| 1-1 | 初始化完整性 | ✅ |
+| 1-2 | compute_utility 公式 (U=6.0) | ✅ |
+| 1-3 | decay 衰減 (10→9.0→8.1) | ✅ |
+| 1-4 | decay 邊界 (γ=0, γ=1) | ✅ |
+| 1-5 | 序列化 round-trip | ✅ |
+| 1-6 | 節點增刪 + 邊清理 | ✅ |
+| 1-7 | abstraction DAG / co_occurrence 允許環 | ✅ |
+| 1-8 | get_active_skills (threshold=0.4) | ✅ |
+| 1-9 | compute_entropy (H=ln2≈0.693) | ✅ |
+| 1-10 | compute_capacity (threshold=0.4→3) | ✅ |
+| 1-11 | decay_all 全圖 | ✅ |
+| 1-12 | snapshot 完整性 | ✅ |
+| 1-13 | 空圖安全 | ✅ |
+| 1-14 | 基本分區 (ε=0.05) | ✅ |
+| 1-15 | Hysteresis 防升級振盪 | ✅ |
+| 1-16 | Hysteresis 防降級振盪 | ✅ |
+| 1-17 | update_all 10 skills 批次 | ✅ |
+| 1-18 | 跨階段一致性 (snapshot ↔ partition) | ✅ |
+
+---
+
+## 目前專案狀態
+
+### 已完成模組
+```
+core/           ██████████ config, llm_interface, prompt_builder
+memory/         ██████████ short_term, long_term, episodic_log (+trace), vector_store
+rag/            ██████████ indexer, retriever
+reasoning/      ██████████ cot, tot, react, reflexion, planner
+skills/         ██████████ calculator, file_ops, web_search, registry
+agents/         ██████████ main_agent, evaluator_agent
+skill_graph/    █████████░ skill_node, skill_graph, memory_partition
+experiments/    ██████████ run_experiment, smoke_test (19/19 ✓)
+tests/          ██████████ Phase 1 驗收 (18/18 ✓)
+```
+
+### 待完成
+- [ ] SkillAbstractor — 從 trace 自動抽取新 skill
+- [ ] EvolutionOperator — skill 突變/交叉演化
+- [ ] MetricsTracker — 效能追蹤與視覺化
+- [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
+- [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）
+
