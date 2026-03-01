@@ -123,3 +123,64 @@ experiments/    ██████████ run_experiment, smoke_test (19/19
 - [ ] MetricsTracker — 效能追蹤與視覺化
 - [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
 - [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）
+
+---
+
+## 2026-03-01 — SkillGraph (Self-Evolving Skill Graph)
+
+### 修改內容
+- 新增 `skill_graph/skill_graph.py`：`SkillGraph` 類別
+- 新增 `skill_graph/test_skill_graph.py`：19 項單元測試
+- `requirements.txt` 加入 `networkx>=3.0`
+
+### 形式化定義對應
+- **G_t = (Σ_t, E_t, W_t)**：networkx.DiGraph，節點存 SkillNode，邊有 weight + edge_type
+- **三種邊類型**：co_occurrence（允許環）、dependency、abstraction（強制 DAG）
+- **結構熵**：H(G_t) = −Σ p(σ) log₂ p(σ)，p(σ) = U(σ)/ΣU
+- **結構容量**：K* = |{σ : U(σ) ≥ θ}|，系統上限 K ≥ K*
+
+### 實作方法
+| 方法 | 功能 |
+|------|------|
+| `add_skill(skill)` | 加入節點，檢查容量上限 |
+| `remove_skill(id)` | 移除節點與所有相關邊 |
+| `add_edge(src, dst, w, type)` | 加邊，abstraction 型自動驗證 DAG |
+| `get_active_skills(θ)` | 回傳 U ≥ θ 的技能 |
+| `compute_entropy()` | 計算結構熵 |
+| `compute_capacity(θ)` | 計算結構容量 K* |
+| `decay_all(γ)` | 全體 utility 衰減 |
+| `get_subgraph(ids)` | 取出子圖 |
+| `snapshot()` | 輸出完整狀態 dict |
+
+### 🔴 遇到的問題
+- `networkx` 未安裝 → `pip install networkx` 解決
+
+### 測試結果
+- 19/19 單元測試全部通過 ✓
+
+### 產出能力
+- Skill Graph 的圖結構已就緒
+- 支援節點增刪、三種語義邊（含 DAG 驗證）、結構熵/容量查詢、全體衰減、快照
+
+---
+
+## 目前專案狀態
+
+### 已完成模組
+```
+core/           ██████████ config, llm_interface, prompt_builder
+memory/         ██████████ short_term, long_term, episodic_log (+trace), vector_store
+rag/            ██████████ indexer, retriever
+reasoning/      ██████████ cot, tot, react, reflexion, planner
+skills/         ██████████ calculator, file_ops, web_search, registry
+agents/         ██████████ main_agent, evaluator_agent
+skill_graph/    ████████░░ skill_node, skill_graph (Abstractor, Evolution 待做)
+experiments/    ██████████ run_experiment, smoke_test (19/19 ✓)
+```
+
+### 待完成
+- [ ] SkillAbstractor — 從 trace 自動抽取新 skill
+- [ ] EvolutionOperator — skill 突變/交叉演化
+- [ ] MetricsTracker — 效能追蹤與視覺化
+- [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
+- [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）
