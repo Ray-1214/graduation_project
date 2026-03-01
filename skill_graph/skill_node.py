@@ -62,6 +62,9 @@ class SkillNode:
         updated_at:     Epoch timestamp of last modification.
         parent_id:      skill_id of the ancestor skill (if evolved).
         tags:           Free-form metadata tags for search / grouping.
+        document_path:  Relative path to the skill's Markdown operation
+                        manual (e.g. "skills/learned/sk-abc123.md").
+                        Set by SkillDocumentGenerator in Phase 2.
     """
 
     # ── Identity ─────────────────────────────────────────────────────
@@ -92,6 +95,7 @@ class SkillNode:
     updated_at: float = field(default_factory=time.time)
     parent_id: Optional[str] = None
     tags: List[str] = field(default_factory=list)
+    document_path: Optional[str] = None
 
     # ── Utility computation ──────────────────────────────────────────
 
@@ -205,6 +209,7 @@ class SkillNode:
             utility=0.0,
             parent_id=self.skill_id,
             tags=new_tags if new_tags is not None else list(self.tags),
+            document_path=None,  # new version needs fresh .md
         )
 
     # ── Serialization ────────────────────────────────────────────────
@@ -215,8 +220,13 @@ class SkillNode:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SkillNode":
-        """Deserialize from a dict."""
-        return cls(**data)
+        """Deserialize from a dict.
+
+        Filters unknown keys so older JSON files (without newer
+        fields like ``document_path``) load without error.
+        """
+        valid = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in valid})
 
     def save(self, path: str) -> None:
         """Persist to a JSON file."""
