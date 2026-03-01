@@ -320,3 +320,60 @@ tests/          ██████████ Phase 1 驗收 (18/18 ✓)
 - [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
 - [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）
 
+---
+
+## 2026-03-01 — WebSearch 實作 + KnowledgeStore
+
+### 修改內容
+- 重寫 `skills/web_search.py`：stub → 真正的 DuckDuckGo 搜尋
+- 新增 `rag/knowledge_store.py`：JSON-backed 搜尋結果快取
+- `.gitignore` 加入 `rag/knowledge_base/*.json`
+
+### 功能
+| 功能 | 實作 |
+|------|------|
+| 搜尋引擎 | `duckduckgo_search` v8.1.1 (`DDGS.text()`) |
+| 結果數量 | Top 5 (title + snippet + URL) |
+| Timeout | 10 秒逾時 → `TimeoutError` |
+| Rate limiting | ≥ 1 秒間隔（thread-safe lock） |
+| 快取 | KnowledgeStore write-through，24h TTL |
+| 快取命中 | 輸出標記 `(cached)` |
+
+### KnowledgeStore
+- JSON 字典 `{normalized_query → {query, results, timestamp}}`
+- 路徑：`rag/knowledge_base/search_cache.json`
+- 方法：`lookup(query)`, `store(query, results)`
+- TTL：預設 86400 秒（24 小時）
+
+### 🔴 遇到的問題
+- **DDGS v8 不是 context manager**：`with DDGS() as ddgs` 會 hang → 改為直接實例化
+- **Deprecation warning**：`duckduckgo_search` 已更名為 `ddgs`，但 v8.1.1 仍可正常使用
+
+### 測試結果
+- ✅ 實際搜尋 "什麼是微積分" → 回傳 5 筆結果
+- ✅ 第二次查詢 → cache hit，顯示 `(cached)`
+- ✅ `search_cache.json` 正確持久化
+
+---
+
+## 目前專案狀態
+
+### 已完成模組
+```
+core/           ██████████ config, llm_interface, prompt_builder
+memory/         ██████████ short_term, long_term, episodic_log (+trace), vector_store
+rag/            ██████████ indexer, retriever, knowledge_store
+reasoning/      ██████████ cot, tot, react, reflexion, planner
+skills/         ██████████ calculator, file_ops, web_search (real DDG), registry
+agents/         ██████████ main_agent, evaluator_agent
+skill_graph/    █████████░ skill_node, skill_graph, memory_partition
+experiments/    ██████████ run_experiment, smoke_test (19/19 ✓)
+tests/          ██████████ Phase 1 驗收 (18/18 ✓)
+```
+
+### 待完成
+- [ ] SkillAbstractor — 從 trace 自動抽取新 skill
+- [ ] EvolutionOperator — skill 突變/交叉演化
+- [ ] MetricsTracker — 效能追蹤與視覺化
+- [ ] 使用 Mistral 模型實際跑完整 ReAct / ToT 實驗
+- [ ] 端到端整合測試（RAG + ReAct + Reflexion + Skill Graph）

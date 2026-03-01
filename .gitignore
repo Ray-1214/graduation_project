@@ -159,6 +159,7 @@ models/embeddings/*
 experiments/results/
 memory/*.json
 !memory/__init__.py
+rag/knowledge_base/*.json
 
 # OS-specific files
 .DS_Store
