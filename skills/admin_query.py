@@ -112,16 +112,14 @@ class AdminQuery(BaseSkill):
         store = self._get_store()
         if store is not None and not response.endswith("(no response provided)"):
             try:
-                store.store(
+                from rag.knowledge_store import KnowledgeEntry
+                entry = KnowledgeEntry(
                     query=question,
-                    results=[{
-                        "title": "Admin Response",
-                        "snippet": response.removeprefix("[Admin] "),
-                        "url": "",
-                        "source": "admin",
-                        "timestamp": str(time.time()),
-                    }],
+                    content=response.removeprefix("[Admin] "),
+                    source="admin",
+                    confidence=0.9,
                 )
+                store.store(entry)
                 logger.info("Admin response cached for: %s", question)
             except Exception as exc:
                 logger.warning("Failed to cache admin response: %s", exc)

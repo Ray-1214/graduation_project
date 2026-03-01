@@ -134,22 +134,36 @@ class WebSearch(BaseSkill):
     def execute(self, input_text: str) -> str:
         """Search the web for *input_text* and return formatted results.
 
-        1. Check KnowledgeStore cache first.
+        1. Check KnowledgeStore for existing knowledge.
         2. If miss, query DuckDuckGo.
-        3. Cache results in KnowledgeStore.
+        3. Store results as KnowledgeEntry objects.
         4. Return formatted string.
         """
         query = input_text.strip()
         if not query:
             return "Error: empty search query."
 
-        # 1. Cache check
         store = self._get_store()
+
+        # 1. Check if we already have relevant knowledge
         if store is not None:
-            cached = store.lookup(query)
-            if cached is not None:
-                logger.info("Cache hit for '%s' (%d results)", query, len(cached))
-                return self._format_results(query, cached, from_cache=True)
+            try:
+                if store.has_knowledge(query, threshold=0.8):
+                    from rag.knowledge_store import KnowledgeEntry
+                    entries = store.search(query, top_k=_MAX_RESULTS)
+                    if entries:
+                        cached_results = [
+                            {
+                                "title": f"[{e.source}] {e.query[:50]}",
+                                "snippet": e.content,
+                                "url": e.url or "",
+                            }
+                            for e in entries
+                        ]
+                        logger.info("Knowledge hit for '%s' (%d entries)", query, len(entries))
+                        return self._format_results(query, cached_results, from_cache=True)
+            except Exception as exc:
+                logger.debug("Knowledge lookup failed: %s", exc)
 
         # 2. Live search
         try:
@@ -160,12 +174,22 @@ class WebSearch(BaseSkill):
             logger.error("Search failed: %s", exc)
             return f"Error: search failed — {exc}"
 
-        # 3. Cache write-through
+        # 3. Store each result as a KnowledgeEntry
         if store is not None and results:
             try:
-                store.store(query, results)
+                from rag.knowledge_store import KnowledgeEntry
+                for r in results:
+                    entry = KnowledgeEntry(
+                        query=query,
+                        content=r.get("snippet", ""),
+                        source="web",
+                        confidence=0.6,
+                        url=r.get("url", ""),
+                    )
+                    store.store(entry)
             except Exception as exc:
-                logger.warning("Failed to cache results: %s", exc)
+                logger.warning("Failed to store knowledge: %s", exc)
 
         # 4. Format and return
         return self._format_results(query, results)
+
