@@ -3,19 +3,27 @@ Main Agent — top-level orchestrator for the cognitive architecture.
 
 Routes tasks to reasoning strategies, optionally injects RAG context,
 runs evaluation and reflexion, and returns structured results.
+
+Phase 2 additions:
+  - SkillGraph integration: retrieves relevant learned skills before
+    reasoning and evolves the graph after each episode.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Tuple
+
+import networkx as nx  # type: ignore
 
 from core.config import Config
 from core.llm_interface import BaseLLM, LlamaCppLLM
 from core.prompt_builder import PromptBuilder
-from memory.episodic_log import EpisodicLog
+from memory.episodic_log import EpisodicLog, convert_log_to_trace
 from memory.long_term import LongTermMemory
 from memory.short_term import ShortTermMemory
 from memory.vector_store import VectorStore
@@ -33,6 +41,10 @@ from skills.registry import SkillRegistry
 from skills.web_search import WebSearch
 from skills.admin_query import AdminQuery
 from rag.knowledge_store import KnowledgeStore
+from skill_graph.skill_graph import SkillGraph
+from skill_graph.skill_node import SkillNode
+from skill_graph.memory_partition import MemoryPartition
+from skill_graph.evolution_operator import EvolutionOperator
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +59,7 @@ class AgentResult:
     reflection: Optional[str] = None
     episode: Optional[Dict[str, Any]] = None
     duration_s: Optional[float] = None
+    evolution_log: Optional[str] = None
 
 
 class MainAgent:
@@ -105,6 +118,14 @@ class MainAgent:
         # Evaluator
         self.evaluator = EvaluatorAgent(self.llm, self.pb)
 
+        # Skill Graph + Evolution (Phase 2)
+        self.skill_graph = SkillGraph()
+        self.memory_partition = MemoryPartition(
+            theta_high=0.7, theta_low=0.3,
+            epsilon_h=0.05, epsilon_l=0.05,
+        )
+        self.evolution = EvolutionOperator()
+
     # ── public API ───────────────────────────────────────────────────
 
     def run(
@@ -152,12 +173,33 @@ class MainAgent:
             effective_task = f"{lessons}\n\n{effective_task}"
             episode.log_step("thought", "Past reflexion lessons injected")
 
+        # 4.5  Skill retrieval from graph (Phase 2)
+        if len(self.skill_graph) > 0:
+            retrieved = self._retrieve_skills(task)
+            if retrieved:
+                skill_block = self._format_skills_for_prompt(retrieved)
+                effective_task = f"{skill_block}\n\n{effective_task}"
+                episode.log_step(
+                    "thought",
+                    f"Injected {len(retrieved)} learned skill(s) from graph",
+                )
+
         # 5. Run the selected strategy
         answer = self._dispatch(strat, effective_task, episode)
 
         # 6. Evaluate
         score = self.evaluator.evaluate(task, answer)
         episode.finish(result=answer, score=score)
+
+        # 6.5  Evolution step (Phase 2)
+        trace = convert_log_to_trace(
+            episode,
+            task_id=f"ep-{uuid.uuid4().hex[:8]}",
+        )
+        evo_log = self.evolution.evolve(
+            self.skill_graph, trace, self.memory_partition,
+        )
+        logger.info("Evolution: %s", evo_log.summary())
 
         # 7. Reflexion (optional)
         reflection_text = None
@@ -171,6 +213,7 @@ class MainAgent:
             task=task,
             strategy=strat,
             answer=answer,
+            evolution_log=evo_log.summary(),
             score=score,
             reflection=reflection_text,
             episode=episode.to_dict(),
@@ -203,3 +246,82 @@ class MainAgent:
         else:
             logger.warning("Unknown strategy '%s', falling back to CoT.", strategy)
             return self.cot.run(task, episode)
+
+    # ── Skill Graph helpers (Phase 2) ────────────────────────────────
+
+    def _retrieve_skills(
+        self,
+        task: str,
+        top_k: int = 3,
+        lambda1: float = 0.5,
+        lambda2: float = 0.3,
+        lambda3: float = 0.2,
+    ) -> List[Tuple[SkillNode, float]]:
+        """Retrieve top-k skills by activation score.
+
+        activation(σ) = λ₁·sim(task, σ) + λ₂·U(σ) + λ₃·centrality(σ)
+
+        Args:
+            task:    Task description string.
+            top_k:   Number of skills to retrieve.
+            lambda1: Weight for textual similarity.
+            lambda2: Weight for normalised utility.
+            lambda3: Weight for PageRank centrality.
+
+        Returns:
+            List of (SkillNode, activation_score) tuples, sorted
+            descending by activation score.
+        """
+        if len(self.skill_graph) == 0:
+            return []
+
+        # Pre-compute centrality once
+        try:
+            centrality = nx.pagerank(self.skill_graph._graph, alpha=0.85)
+        except nx.NetworkXError:
+            centrality = {nid: 0.0 for nid in self.skill_graph._graph.nodes}
+
+        # Normalise utilities across graph
+        utilities = [s.utility for s in self.skill_graph.skills]
+        max_u = max(utilities) if utilities else 1.0
+        max_u = max(max_u, 1e-9)  # avoid division by zero
+
+        scored: List[Tuple[SkillNode, float]] = []
+        task_lower = task.lower()
+
+        for skill in self.skill_graph.skills:
+            # Textual similarity: keyword overlap via SequenceMatcher
+            sim = SequenceMatcher(
+                None, task_lower,
+                " ".join(skill.initiation_set + [skill.name]).lower(),
+            ).ratio()
+
+            # Normalised utility
+            norm_u = skill.utility / max_u
+
+            # Centrality
+            cent = centrality.get(skill.skill_id, 0.0)
+
+            activation = lambda1 * sim + lambda2 * norm_u + lambda3 * cent
+            scored.append((skill, activation))
+
+        # Sort descending, take top-k
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+    @staticmethod
+    def _format_skills_for_prompt(
+        skills_with_scores: List[Tuple[SkillNode, float]],
+    ) -> str:
+        """Format retrieved skills as a prompt block."""
+        lines = ["[已學到的策略 — 你可以直接使用以下技能]"]
+        for i, (skill, score) in enumerate(skills_with_scores, 1):
+            lines.append(
+                f"\n策略 {i}: {skill.name} "
+                f"(activation={score:.2f}, utility={skill.utility:.2f})"
+            )
+            lines.append(f"  適用: {', '.join(skill.initiation_set)}")
+            lines.append(f"  步驟: {skill.policy}")
+            lines.append(f"  終止: {skill.termination}")
+        return "\n".join(lines)
+
