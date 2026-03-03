@@ -347,6 +347,26 @@ class TestEdgeCases:
         content = (tmp_path / path).read_text(encoding="utf-8")
         assert "Phase 3" in content
 
+    def test_idempotent_regeneration(self, tmp_path):
+        """Regenerating for the same skill overwrites, no dup files."""
+        gen = SkillDocumentGenerator(llm=None, root=tmp_path)
+        skill = _make_skill(skill_id="sk-idem-001")
+
+        path1 = gen.generate(skill, [_make_trace("tr-v1", ["old_step"])])
+        path2 = gen.generate(skill, [_make_trace("tr-v2", ["new_step"])])
+
+        # Same path returned both times
+        assert path1 == path2
+
+        # Content is the latest version
+        content = (tmp_path / path2).read_text(encoding="utf-8")
+        assert "new_step" in content
+
+        # Only one file in the output directory for this skill
+        learned_dir = tmp_path / "skills" / "learned"
+        md_files = list(learned_dir.glob("sk-idem-001.md"))
+        assert len(md_files) == 1
+
     def test_repr(self):
         """__repr__ shows mode."""
         gen = SkillDocumentGenerator(llm=None)
