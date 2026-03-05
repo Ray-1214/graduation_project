@@ -7,6 +7,12 @@ runs evaluation and reflexion, and returns structured results.
 Phase 2 additions:
   - SkillGraph integration: retrieves relevant learned skills before
     reasoning and evolves the graph after each episode.
+
+Phase 3.5 additions:
+  - CompoundReasoner replaces _dispatch() — unified multi-phase engine.
+  - HallucinationGuard — 3-stage fact grounding pipeline.
+  - ContextAssembler — slot-based context window management.
+  - ReflexionMemoryWriter — routes reflexion insights to memory stores.
 """
 
 from __future__ import annotations
@@ -24,9 +30,13 @@ from memory.episodic_log import EpisodicLog, convert_log_to_trace
 from memory.long_term import LongTermMemory
 from memory.short_term import ShortTermMemory
 from memory.vector_store import VectorStore
+from memory.reflexion_memory_writer import ReflexionMemoryWriter
 from rag.indexer import Indexer
 from rag.retriever import Retriever
 from reasoning.cot import ChainOfThought
+from reasoning.context_assembler import ContextAssembler
+from reasoning.compound_reasoner import CompoundReasoner
+from reasoning.hallucination_guard import HallucinationGuard
 from reasoning.planner import StrategyPlanner
 from reasoning.react import ReActLoop
 from reasoning.reflexion import Reflexion
@@ -57,6 +67,9 @@ class AgentResult:
     episode: Optional[Dict[str, Any]] = None
     duration_s: Optional[float] = None
     evolution_log: Optional[str] = None
+    # Phase 3.5: CompoundReasoner additions
+    verification_verdict: Optional[str] = None
+    hallucination_score: Optional[float] = None
 
 
 class MainAgent:
@@ -124,6 +137,32 @@ class MainAgent:
         self.evolution = EvolutionOperator()
         self.skill_retriever = SkillRetriever(top_k=3)
 
+        # ── Phase 3.5: Compound Reasoning Pipeline ───────────────
+        self.hallucination_guard = HallucinationGuard(
+            llm=self.llm,
+            knowledge_store=self.knowledge_store,
+        )
+        self.context_assembler = ContextAssembler(
+            max_total_tokens=4000,
+            llm=self.llm,
+        )
+        self.compound_reasoner = CompoundReasoner(
+            llm=self.llm,
+            prompt_builder=self.pb,
+            skill_registry=self.skills,
+            cot=self.cot,
+            tot=self.tot,
+            react=self.react,
+            reflexion=self.reflexion,
+            hallucination_guard=self.hallucination_guard,
+            context_assembler=self.context_assembler,
+            knowledge_store=self.knowledge_store,
+        )
+        self.reflexion_writer = ReflexionMemoryWriter(
+            long_term=self.long_term,
+            knowledge_store=self.knowledge_store,
+        )
+
     # ── public API ───────────────────────────────────────────────────
 
     def run(
@@ -138,7 +177,7 @@ class MainAgent:
         Args:
             task: The problem or question to reason about.
             strategy: Force a specific strategy (cot/tot/react).
-                      Auto-selected if None.
+                      Auto-selected via Phase ① if None.
             use_rag: Whether to inject RAG context before reasoning.
             do_reflect: Whether to run Reflexion after the task.
 
@@ -147,7 +186,7 @@ class MainAgent:
         """
         start_time = time.time()
 
-        # 1. Select strategy
+        # 1. Select strategy (for logging; CompoundReasoner may override)
         strat = strategy or self.planner.select_strategy(task)
         logger.info("Running task with strategy: %s", strat)
 
@@ -172,18 +211,41 @@ class MainAgent:
             episode.log_step("thought", "Past reflexion lessons injected")
 
         # 4.5  Skill retrieval from graph (Phase 2)
+        retrieved_skills = []
         if len(self.skill_graph) > 0:
-            retrieved = self.skill_retriever.retrieve(task, self.skill_graph)
-            if retrieved:
-                skill_block = self.skill_retriever.format_for_prompt(retrieved)
+            retrieved_skills = self.skill_retriever.retrieve(
+                task, self.skill_graph,
+            )
+            if retrieved_skills:
+                skill_block = self.skill_retriever.format_for_prompt(
+                    retrieved_skills,
+                )
                 effective_task = f"{skill_block}\n\n{effective_task}"
                 episode.log_step(
                     "thought",
-                    f"Injected {len(retrieved)} learned skill(s) from graph",
+                    f"Injected {len(retrieved_skills)} learned skill(s) from graph",
                 )
 
-        # 5. Run the selected strategy
-        answer = self._dispatch(strat, effective_task, episode)
+        # ── Phase 3.5: CompoundReasoner replaces _dispatch() ─────
+        # force_strategy=None  → Phase ① auto-selects
+        # force_strategy="cot" → backward-compatible forced mode
+        result = self.compound_reasoner.run(
+            effective_task, episode,
+            force_strategy=strategy,  # None = auto, else forced
+        )
+        answer = result.answer
+
+        # Record verification metadata to episode
+        verification_verdict = None
+        hallucination_score = None
+        if result.verification:
+            verification_verdict = result.verification.verdict
+            hallucination_score = result.verification.hallucination_score
+            episode.log_step(
+                "verification",
+                f"verdict={verification_verdict}, "
+                f"hallucination_score={hallucination_score}",
+            )
 
         # 6. Evaluate
         score = self.evaluator.evaluate(task, answer)
@@ -205,17 +267,37 @@ class MainAgent:
             entry = self.reflexion.reflect(task, episode, answer, score)
             reflection_text = entry.reflection
 
+            # Phase 3.5: Route reflexion insights to memory systems
+            try:
+                commit = self.reflexion_writer.process(
+                    reflexion_text=reflection_text,
+                    trace=trace,
+                    success=trace.success,
+                    used_skills=retrieved_skills or None,
+                )
+                logger.info(
+                    "ReflexionMemoryWriter: lessons=%d, knowledge=%d, "
+                    "warnings=%d",
+                    commit.strategy_lessons_written,
+                    commit.knowledge_gains_written,
+                    commit.warnings_dispatched,
+                )
+            except Exception as exc:
+                logger.warning("ReflexionMemoryWriter failed: %s", exc)
+
         duration = time.time() - start_time
 
         return AgentResult(
             task=task,
-            strategy=strat,
+            strategy=result.strategy_used,
             answer=answer,
             evolution_log=evo_log.summary(),
             score=score,
             reflection=reflection_text,
             episode=episode.to_dict(),
             duration_s=round(duration, 2),
+            verification_verdict=verification_verdict,
+            hallucination_score=hallucination_score,
         )
 
     def index_knowledge(self, path: str) -> int:
@@ -226,7 +308,7 @@ class MainAgent:
             return self.indexer.index_directory(path)
         return self.indexer.index_file(path)
 
-    # ── internals ────────────────────────────────────────────────────
+    # ── internals (deprecated — kept for reference) ──────────────────
 
     def _dispatch(
         self,
@@ -234,7 +316,12 @@ class MainAgent:
         task: str,
         episode: EpisodicLog,
     ) -> str:
-        """Dispatch to the appropriate reasoning strategy."""
+        """Dispatch to the appropriate reasoning strategy.
+
+        .. deprecated::
+            Replaced by :meth:`CompoundReasoner.run`. Kept for
+            backward compatibility if called directly.
+        """
         if strategy == "cot":
             return self.cot.run(task, episode)
         elif strategy == "tot":
@@ -244,4 +331,3 @@ class MainAgent:
         else:
             logger.warning("Unknown strategy '%s', falling back to CoT.", strategy)
             return self.cot.run(task, episode)
-

@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
 
 import pytest
 
@@ -29,6 +30,7 @@ from memory.episodic_log import (
     TraceStep,
     convert_log_to_trace,
 )
+from reasoning.compound_result import CompoundResult, VerificationResult
 from skill_graph.evolution_operator import EvolutionOperator
 from skill_graph.memory_partition import MemoryPartition
 from skill_graph.skill_document_updater import SkillDocumentUpdater
@@ -136,15 +138,17 @@ class TestAgentIntegration:
         agent = MainAgent()
         assert len(agent.skill_graph) == 0
 
-        # Patch the _dispatch to capture the effective_task
+        # Patch compound_reasoner.run to capture effective_task
         captured_tasks: list[str] = []
-        original_dispatch = agent._dispatch
 
-        def capture_dispatch(strat, task, episode):
+        def capture_run(task, episode, force_strategy=None):
             captured_tasks.append(task)
-            return "test answer"
+            return CompoundResult(
+                answer="test answer",
+                strategy_used=force_strategy or "cot",
+            )
 
-        agent._dispatch = capture_dispatch
+        agent.compound_reasoner.run = capture_run
         # Patch evaluator to skip LLM call
         agent.evaluator.evaluate = MagicMock(return_value=0.9)
         agent.reflexion.reflect = MagicMock(
@@ -193,14 +197,17 @@ class TestAgentIntegration:
         # Point retriever to tmp_path
         agent.skill_retriever.root = tmp_path
 
-        # Capture what prompt is sent to _dispatch
+        # Capture what prompt is sent to compound_reasoner.run
         captured: list[str] = []
 
-        def capture(strat, task, episode):
+        def capture_run(task, episode, force_strategy=None):
             captured.append(task)
-            return "answer"
+            return CompoundResult(
+                answer="answer",
+                strategy_used=force_strategy or "cot",
+            )
 
-        agent._dispatch = capture
+        agent.compound_reasoner.run = capture_run
         agent.evaluator.evaluate = MagicMock(return_value=0.9)
         agent.reflexion.reflect = MagicMock(
             return_value=MagicMock(reflection="OK"),
@@ -230,7 +237,9 @@ class TestAgentIntegration:
 
         snap_before = agent.skill_graph.snapshot()
 
-        agent._dispatch = lambda s, t, e: "answer"
+        agent.compound_reasoner.run = lambda t, e, force_strategy=None: CompoundResult(
+            answer="answer", strategy_used=force_strategy or "cot",
+        )
         agent.evaluator.evaluate = MagicMock(return_value=0.9)
         agent.reflexion.reflect = MagicMock(
             return_value=MagicMock(reflection="OK"),
@@ -260,7 +269,9 @@ class TestAgentIntegration:
 
         agent = MainAgent()
 
-        agent._dispatch = lambda s, t, e: "answer"
+        agent.compound_reasoner.run = lambda t, e, force_strategy=None: CompoundResult(
+            answer="answer", strategy_used=force_strategy or "cot",
+        )
         agent.evaluator.evaluate = MagicMock(return_value=0.8)
         agent.reflexion.reflect = MagicMock(
             return_value=MagicMock(reflection="OK"),
