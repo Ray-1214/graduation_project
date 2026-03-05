@@ -30,6 +30,7 @@ from reasoning.compound_result import (
     SelfCheckResult,
     ThinkingResult,
     VerificationResult,
+    VERDICT_PASS,
 )
 
 if TYPE_CHECKING:
@@ -141,6 +142,19 @@ class CompoundReasoner:
         )
 
         # ── Phase ③ Answer Verification ─────────────────────────
+        # Simple tasks skip verification to save tokens.
+        if thinking.complexity == "simple":
+            return CompoundResult(
+                answer=answer,
+                confidence=1.0,
+                strategy_used=thinking.recommended_strategy,
+                thinking=thinking,
+                verification=None,
+                steps_taken=steps_taken,
+                think_steps=think_count,
+                self_checks=check_count,
+            )
+
         trace_observations = self._collect_observations(episode)
         verification = self._verify_answer(
             answer, task, trace_observations, episode,
@@ -369,6 +383,7 @@ class CompoundReasoner:
                         + "\n請根據以上問題調整策略。\n"
                     )
                     previous_steps += replan_note
+                    episode.log_step("replan", replan_note.strip())
 
             # ── Generate Thought ─────────────────────────────────
             thought_prompt = self.pb.build(
@@ -610,11 +625,19 @@ class CompoundReasoner:
         episode: "EpisodicLog",
     ) -> VerificationResult:
         """Run Answer Verification Gate (HallucinationGuard)."""
-        return self.guard.verify(
+        result = self.guard.verify(
             answer, task,
             tool_results=trace_observations,
             episode=episode,
         )
+        if result.verdict != VERDICT_PASS:
+            episode.log_step(
+                "hallucination_detected",
+                f"verdict={result.verdict}, "
+                f"flagged={result.flagged_claims}, "
+                f"score={result.hallucination_score}",
+            )
+        return result
 
     @staticmethod
     def _apply_flags(

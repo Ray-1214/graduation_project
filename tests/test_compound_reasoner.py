@@ -468,7 +468,7 @@ class TestFullPipeline:
         assert result.answer == "CoT answer"
         assert result.thinking is not None
         assert result.thinking.recommended_strategy == "cot_only"
-        assert result.verification is not None
+        assert result.verification is None  # simple → skip verification
 
     def test_full_run_react_cot_finish(self):
         """Full pipeline with react_cot strategy."""
