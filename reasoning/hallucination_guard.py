@@ -1,141 +1,201 @@
 """
-HallucinationGuard — Answer Verification Gate (Phase ③).
+HallucinationGuard — 3-stage Answer Verification Gate (Phase ③).
 
-Extracts factual claims from the answer, cross-checks them against
-the KnowledgeStore and recent tool observations, and flags any
-unverifiable assertions.
+Designed for small models (Mistral-7B) where hallucination rates are
+significantly higher than frontier models.
+
+Pipeline::
+
+    Stage 1  Claim Extraction    → regex + LLM factual assertion extraction
+    Stage 2  Evidence Matching   → tool_results → KnowledgeStore → reflexion
+    Stage 3  Verdict & Action    → PASS / NEEDS_REVISION / UNRELIABLE
 
 References
 ~~~~~~~~~~
-- Huang et al. *"LLMs Cannot Self-Correct Reasoning Yet"*
-  (ICLR 2024, arXiv:2310.01798) — motivates grounding on external
-  signals rather than pure self-assessment.
+- Chain-of-Knowledge (Li et al., ICLR 2024, arXiv:2305.13269):
+  multi-source knowledge cross-validation.
+- "LLMs Cannot Self-Correct Reasoning Yet" (Huang et al., ICLR 2024,
+  arXiv:2310.01798): external signals needed for self-verification.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
-from reasoning.compound_result import VerificationResult
+from reasoning.compound_result import (
+    ClaimVerification,
+    VerificationResult,
+    VERDICT_PASS,
+    VERDICT_NEEDS_REVISION,
+    VERDICT_UNRELIABLE,
+)
 
 if TYPE_CHECKING:
     from core.llm_interface import BaseLLM
     from memory.episodic_log import EpisodicLog
     from rag.knowledge_store import KnowledgeStore
-    from skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
+# ── Status constants ─────────────────────────────────────────────────
+STATUS_VERIFIED = "verified"
+STATUS_INFERRED = "inferred"
+STATUS_UNVERIFIED = "unverified"
+STATUS_CONFLICT = "conflict"
+
+# ── Default thresholds ───────────────────────────────────────────────
+_DEFAULT_CONFLICT_THRESHOLD = 0.7
+_KEYWORD_OVERLAP_VERIFIED = 0.5
+_KEYWORD_OVERLAP_INFERRED = 0.3
+_MAX_CLAIMS = 10
+_UNVERIFIED_RATIO_UNRELIABLE = 0.5  # > 50% unverified → UNRELIABLE
+
 
 class HallucinationGuard:
-    """Verifies factual claims in an answer before returning it.
+    """Three-stage answer verification for small-LLM agents.
+
+    Stage 1 — **Claim Extraction**: extracts key factual assertions.
+    Stage 2 — **Evidence Matching**: checks each claim against tool
+              results, KnowledgeStore (web/admin), then reflexion.
+    Stage 3 — **Verdict & Action**: determines overall reliability.
 
     Args:
-        llm:              LLM backend for claim extraction.
-        knowledge_store:  KnowledgeStore for cross-validation.
-        skill_registry:   Optional tool registry for live verification.
-        confidence_threshold:  Claims below this similarity are flagged.
+        llm:                 LLM backend for claim extraction.
+        knowledge_store:     KnowledgeStore for cross-validation.
+        tools:               Optional callable dict for live verification
+                             (e.g. ``{"web_search": callable}``).
+        conflict_threshold:  Keyword overlap ratio to detect conflict.
     """
 
     def __init__(
         self,
         llm: Optional["BaseLLM"] = None,
         knowledge_store: Optional["KnowledgeStore"] = None,
-        skill_registry: Optional["SkillRegistry"] = None,
-        confidence_threshold: float = 0.6,
+        tools: Optional[Dict[str, object]] = None,
+        conflict_threshold: float = _DEFAULT_CONFLICT_THRESHOLD,
     ) -> None:
         self.llm = llm
         self.knowledge_store = knowledge_store
-        self.skill_registry = skill_registry
-        self.confidence_threshold = confidence_threshold
+        self.tools = tools or {}
+        self.conflict_threshold = conflict_threshold
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Public API
+    # ═══════════════════════════════════════════════════════════════
 
     def verify(
         self,
         answer: str,
         task: str,
-        trace_steps: List[str],
+        tool_results: Optional[List[str]] = None,
+        trace: Optional[List[str]] = None,
         episode: Optional["EpisodicLog"] = None,
     ) -> VerificationResult:
-        """Run the verification gate on an answer.
-
-        Steps:
-          1. Extract factual claims from the answer.
-          2. Cross-check each claim against KnowledgeStore.
-          3. For unverified claims, attempt tool verification.
-          4. Return flagged claims and overall confidence.
+        """Run the full 3-stage verification pipeline.
 
         Args:
-            answer:      The candidate answer text.
-            task:        Original task description.
-            trace_steps: List of observation strings from execution.
-            episode:     Optional episodic log for recording.
+            answer:       The candidate answer text.
+            task:         Original task description.
+            tool_results: Tool output strings from the current episode.
+            trace:        Additional trace/observation strings.
+            episode:      Optional episodic log for recording steps.
 
         Returns:
-            :class:`VerificationResult` with confidence and flags.
+            :class:`VerificationResult` with verdict and per-claim details.
         """
-        # Step 1: Extract claims
+        all_tool_evidence = list(tool_results or []) + list(trace or [])
+
+        # ── Stage 1: Claim Extraction ────────────────────────────
         claims = self._extract_claims(answer)
+
         if not claims:
             if episode:
-                episode.log_step("self_check", "No factual claims to verify")
+                episode.log_step(
+                    "self_check", "No factual claims to verify",
+                )
             return VerificationResult(
-                verified=True, confidence=0.9,
+                verdict=VERDICT_PASS,
+                verified=True,
+                confidence=0.9,
+                hallucination_score=0.0,
                 report="No factual claims extracted; answer accepted.",
             )
 
-        # Step 2: Cross-check against knowledge store
-        flagged: List[str] = []
-        verified_count = 0
+        # ── Stage 2: Evidence Matching ───────────────────────────
+        claim_results: List[ClaimVerification] = []
+        for claim_text in claims:
+            cv = self._match_evidence(claim_text, all_tool_evidence)
+            claim_results.append(cv)
 
-        for claim in claims:
-            is_verified = self._check_against_knowledge(claim)
-            if not is_verified:
-                is_verified = self._check_against_trace(claim, trace_steps)
-            if not is_verified:
-                is_verified = self._try_tool_verification(claim)
+        # ── Stage 3: Verdict & Action ────────────────────────────
+        verdict = self._determine_verdict(claim_results)
 
-            if is_verified:
-                verified_count += 1
-            else:
-                flagged.append(claim)
-
-        # Compute confidence
-        total = len(claims)
+        # Compute backward-compat fields
+        verified_count = sum(
+            1 for c in claim_results
+            if c.status in (STATUS_VERIFIED, STATUS_INFERRED)
+        )
+        total = len(claim_results)
         confidence = verified_count / total if total > 0 else 1.0
+        hallucination_score = 1.0 - confidence
 
-        # Log
-        if episode:
-            episode.log_step(
-                "self_check",
-                f"Verification: {verified_count}/{total} claims verified, "
-                f"{len(flagged)} flagged, confidence={confidence:.2f}",
-            )
-
-        verified = len(flagged) == 0
-        report_lines = [
-            f"Verified {verified_count}/{total} factual claims.",
+        flagged = [
+            c.claim for c in claim_results
+            if c.status in (STATUS_UNVERIFIED, STATUS_CONFLICT)
         ]
+
+        # Build report
+        report_lines = [
+            f"Verdict: {verdict}",
+            f"Claims: {verified_count}/{total} verified, "
+            f"{len(flagged)} flagged",
+        ]
+        for cv in claim_results:
+            tag = cv.status.upper()
+            src = f" ({cv.evidence_source})" if cv.evidence_source else ""
+            report_lines.append(f"  [{tag}]{src} {cv.claim[:80]}")
         if flagged:
             report_lines.append("Flagged claims:")
             for f in flagged:
                 report_lines.append(f"  - [unverified] {f}")
 
+        # Log to episodic log
+        if episode:
+            episode.log_step(
+                "self_check",
+                f"Verification: verdict={verdict}, "
+                f"{verified_count}/{total} verified, "
+                f"hallucination_score={hallucination_score:.2f}",
+            )
+
+        logger.info(
+            "HallucinationGuard: verdict=%s, verified=%d/%d, "
+            "hallucination=%.2f",
+            verdict, verified_count, total, hallucination_score,
+        )
+
         return VerificationResult(
-            verified=verified,
+            verdict=verdict,
+            claims=claim_results,
+            revised_answer=None,
+            hallucination_score=round(hallucination_score, 2),
+            verified=(verdict == VERDICT_PASS),
             confidence=round(confidence, 2),
             flagged_claims=flagged,
             report="\n".join(report_lines),
         )
 
-    # ── Claim extraction ─────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    #  Stage 1 — Claim Extraction
+    # ═══════════════════════════════════════════════════════════════
 
     def _extract_claims(self, answer: str) -> List[str]:
-        """Extract factual claims from the answer.
+        """Extract verifiable factual assertions from the answer.
 
-        Uses LLM if available; otherwise falls back to sentence-level
-        heuristic extraction.
+        Uses LLM if available; falls back to sentence-level heuristics.
+        Skips subjective opinions and hedged statements.
         """
         if self.llm is not None:
             try:
@@ -158,48 +218,302 @@ class HallucinationGuard:
             for line in response.strip().split("\n")
             if line.strip() and len(line.strip()) > 10
         ]
-        return claims[:10]  # cap
+        return claims[:_MAX_CLAIMS]
 
     @staticmethod
     def _extract_claims_heuristic(answer: str) -> List[str]:
-        """Extract sentences that look like factual claims."""
-        # Split into sentences — avoid splitting on decimal points (e.g. 1.5)
+        """Extract sentences that look like factual claims.
+
+        Heuristics:
+          - Split on sentence boundaries (handles decimal numbers).
+          - Skip questions, opinions, hedging.
+          - Keep statements with numbers, names, or longer assertions.
+        """
+        # Split into sentences — avoid splitting on decimal points
         sentences = re.split(r"(?<!\d)[。.]\s*|[!！?？\n]", answer)
-        claims = []
+        claims: List[str] = []
         for s in sentences:
             s = s.strip()
             if len(s) < 10:
                 continue
             # Skip questions, opinions, hedging
-            if any(kw in s for kw in ["？", "?", "我認為", "可能", "也許",
-                                       "I think", "maybe", "perhaps"]):
+            if any(kw in s for kw in [
+                "？", "?", "我認為", "可能", "也許",
+                "I think", "maybe", "perhaps",
+            ]):
                 continue
             # Keep sentences with numbers, names, or definitive statements
             if any(c.isdigit() for c in s) or len(s) > 20:
                 claims.append(s)
-        return claims[:10]
+        return claims[:_MAX_CLAIMS]
 
-    # ── Verification backends ────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    #  Stage 2 — Evidence Matching
+    # ═══════════════════════════════════════════════════════════════
 
-    def _check_against_knowledge(self, claim: str) -> bool:
-        """Check if the claim is supported by KnowledgeStore."""
+    def _match_evidence(
+        self,
+        claim: str,
+        tool_results: List[str],
+    ) -> ClaimVerification:
+        """Find the best evidence for a single claim.
+
+        Priority:
+          1. tool_results    (highest trust — direct observation)
+          2. knowledge_store (web/admin source — factual)
+          3. reflexion_knowledge (agent's own inference — lower trust)
+          4. no_evidence
+
+        Also detects conflicts (contradicting evidence).
+        """
+        # 1. Check tool results (most reliable)
+        result = self._check_tool_results(claim, tool_results)
+        if result is not None:
+            return result
+
+        # 2. Check KnowledgeStore — external sources (web/admin)
+        result = self._check_knowledge_store(
+            claim, source_filter=("web", "admin"),
+        )
+        if result is not None:
+            return result
+
+        # 3. Check KnowledgeStore — reflexion sources (lower trust)
+        result = self._check_knowledge_store(
+            claim, source_filter=("reflexion",),
+        )
+        if result is not None:
+            return result
+
+        # 4. No evidence found
+        return ClaimVerification(
+            claim=claim,
+            status=STATUS_UNVERIFIED,
+            evidence_source=None,
+            evidence_text=None,
+            confidence=0.0,
+        )
+
+    def _check_tool_results(
+        self,
+        claim: str,
+        tool_results: List[str],
+    ) -> Optional[ClaimVerification]:
+        """Check claim against tool output strings.
+
+        Returns ClaimVerification if evidence found, else None.
+        """
+        if not tool_results:
+            return None
+
+        claim_lower = claim.lower()
+        claim_words = set(claim_lower.split())
+
+        for result_text in tool_results:
+            result_lower = result_text.lower()
+
+            # Contradiction check FIRST (before substring match)
+            # "claim is true" inside "claim is false, not true" must
+            # be caught as conflict, not verified by substring.
+            if self._texts_contradict(claim, result_text):
+                return ClaimVerification(
+                    claim=claim,
+                    status=STATUS_CONFLICT,
+                    evidence_source="tool",
+                    evidence_text=result_text[:200],
+                    confidence=0.1,
+                )
+
+            # Exact substring match → verified
+            if claim_lower in result_lower:
+                return ClaimVerification(
+                    claim=claim,
+                    status=STATUS_VERIFIED,
+                    evidence_source="tool",
+                    evidence_text=result_text[:200],
+                    confidence=0.95,
+                )
+
+            # Keyword overlap → verified or inferred
+            if len(claim_words) > 3:
+                result_words = set(result_lower.split())
+                overlap = (
+                    len(claim_words & result_words) / len(claim_words)
+                )
+                if overlap >= _KEYWORD_OVERLAP_VERIFIED:
+                    return ClaimVerification(
+                        claim=claim,
+                        status=STATUS_VERIFIED,
+                        evidence_source="tool",
+                        evidence_text=result_text[:200],
+                        confidence=round(0.7 + overlap * 0.2, 2),
+                    )
+                if overlap >= _KEYWORD_OVERLAP_INFERRED:
+                    return ClaimVerification(
+                        claim=claim,
+                        status=STATUS_INFERRED,
+                        evidence_source="tool",
+                        evidence_text=result_text[:200],
+                        confidence=round(0.4 + overlap * 0.3, 2),
+                    )
+
+        return None
+
+    def _check_knowledge_store(
+        self,
+        claim: str,
+        source_filter: tuple[str, ...] = ("web", "admin"),
+    ) -> Optional[ClaimVerification]:
+        """Check claim against KnowledgeStore entries.
+
+        Args:
+            claim:         The claim to verify.
+            source_filter: Only consider entries from these sources.
+
+        Returns:
+            ClaimVerification if evidence found, else None.
+        """
         if self.knowledge_store is None:
-            return False
+            return None
+
         try:
-            return self.knowledge_store.has_knowledge(
-                claim, threshold=self.confidence_threshold,
-            )
+            entries = self.knowledge_store.search(claim, top_k=3)
         except Exception:
-            return False
+            return None
+
+        if not entries:
+            return None
+
+        claim_lower = claim.lower()
+        claim_words = set(claim_lower.split())
+        is_reflexion = "reflexion" in source_filter
+
+        for entry in entries:
+            entry_source = getattr(entry, "source", "web")
+            if entry_source not in source_filter:
+                continue
+
+            entry_content = getattr(entry, "content", "")
+            entry_lower = entry_content.lower()
+
+            # Check for contradiction
+            if self._texts_contradict(claim, entry_content):
+                return ClaimVerification(
+                    claim=claim,
+                    status=STATUS_CONFLICT,
+                    evidence_source="reflexion" if is_reflexion else "knowledge",
+                    evidence_text=entry_content[:200],
+                    confidence=0.1,
+                )
+
+            # Exact substring match
+            if claim_lower in entry_lower:
+                conf = 0.7 if is_reflexion else 0.85
+                return ClaimVerification(
+                    claim=claim,
+                    status=STATUS_VERIFIED if not is_reflexion else STATUS_INFERRED,
+                    evidence_source="reflexion" if is_reflexion else "knowledge",
+                    evidence_text=entry_content[:200],
+                    confidence=conf,
+                )
+
+            # Keyword overlap
+            if len(claim_words) > 3:
+                entry_words = set(entry_lower.split())
+                overlap = (
+                    len(claim_words & entry_words) / len(claim_words)
+                )
+                if overlap >= _KEYWORD_OVERLAP_VERIFIED:
+                    conf = 0.6 if is_reflexion else 0.75
+                    status = (
+                        STATUS_INFERRED if is_reflexion
+                        else STATUS_VERIFIED
+                    )
+                    return ClaimVerification(
+                        claim=claim,
+                        status=status,
+                        evidence_source="reflexion" if is_reflexion else "knowledge",
+                        evidence_text=entry_content[:200],
+                        confidence=conf,
+                    )
+
+        return None
+
+    # ── Contradiction detection ──────────────────────────────────
+
+    @staticmethod
+    def _texts_contradict(text_a: str, text_b: str) -> bool:
+        """Detect obvious contradictions between two texts.
+
+        Uses negation pattern heuristic. A production system would
+        use NLI or embedding cosine distance.
+        """
+        a = text_a.lower()
+        b = text_b.lower()
+
+        negation_pairs = [
+            ("不是", "是"), ("沒有", "有"), ("不能", "能"),
+            ("false", "true"), ("incorrect", "correct"),
+            ("no", "yes"), ("isn't", "is"), ("不對", "對"),
+            ("不支持", "支持"), ("不包含", "包含"),
+        ]
+        for neg, pos in negation_pairs:
+            if neg in a and pos in b and neg not in b:
+                return True
+            if neg in b and pos in a and neg not in a:
+                return True
+        return False
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Stage 3 — Verdict & Action
+    # ═══════════════════════════════════════════════════════════════
+
+    def _determine_verdict(
+        self,
+        claims: List[ClaimVerification],
+    ) -> str:
+        """Determine overall verdict from per-claim results.
+
+        Rules:
+          - Any ``conflict`` → UNRELIABLE.
+          - More than 50% ``unverified`` → UNRELIABLE.
+          - Any ``unverified`` (but ≤50%) → NEEDS_REVISION.
+          - All ``verified`` or ``inferred`` → PASS.
+        """
+        if not claims:
+            return VERDICT_PASS
+
+        total = len(claims)
+        conflict_count = sum(
+            1 for c in claims if c.status == STATUS_CONFLICT
+        )
+        unverified_count = sum(
+            1 for c in claims if c.status == STATUS_UNVERIFIED
+        )
+
+        if conflict_count > 0:
+            return VERDICT_UNRELIABLE
+
+        if total > 0 and unverified_count / total > _UNVERIFIED_RATIO_UNRELIABLE:
+            return VERDICT_UNRELIABLE
+
+        if unverified_count > 0:
+            return VERDICT_NEEDS_REVISION
+
+        return VERDICT_PASS
+
+    # ── Legacy compatibility ──────────────────────────────────────
 
     @staticmethod
     def _check_against_trace(claim: str, trace_steps: List[str]) -> bool:
-        """Check if the claim appears in recent tool observations."""
+        """Legacy: check if claim text appears in trace observations.
+
+        Kept for backward compatibility with CompoundReasoner tests.
+        """
         claim_lower = claim.lower()
         for step in trace_steps:
             if claim_lower in step.lower():
                 return True
-            # Check for significant keyword overlap
             claim_words = set(claim_lower.split())
             step_words = set(step.lower().split())
             if len(claim_words) > 3:
@@ -208,26 +522,10 @@ class HallucinationGuard:
                     return True
         return False
 
-    def _try_tool_verification(self, claim: str) -> bool:
-        """Attempt to verify a claim using available tools."""
-        if self.skill_registry is None:
-            return False
-        # Only attempt web_search for now
-        tool = self.skill_registry.get("web_search")
-        if tool is None:
-            return False
-        try:
-            result = tool.execute(claim)
-            # Simple heuristic: if search returns relevant content
-            claim_words = set(claim.lower().split())
-            result_words = set(result.lower().split())
-            if len(claim_words) > 3:
-                overlap = len(claim_words & result_words) / len(claim_words)
-                return overlap > 0.3
-        except Exception:
-            pass
-        return False
-
     def __repr__(self) -> str:
         mode = "LLM" if self.llm else "heuristic"
-        return f"HallucinationGuard(mode={mode})"
+        ks = "yes" if self.knowledge_store else "no"
+        return (
+            f"HallucinationGuard(mode={mode}, ks={ks}, "
+            f"tools={list(self.tools.keys())})"
+        )

@@ -610,7 +610,11 @@ class CompoundReasoner:
         episode: "EpisodicLog",
     ) -> VerificationResult:
         """Run Answer Verification Gate (HallucinationGuard)."""
-        return self.guard.verify(answer, task, trace_observations, episode)
+        return self.guard.verify(
+            answer, task,
+            tool_results=trace_observations,
+            episode=episode,
+        )
 
     @staticmethod
     def _apply_flags(

@@ -50,16 +50,51 @@ class SelfCheckResult:
 
 
 @dataclass
+class ClaimVerification:
+    """Result of verifying a single factual claim.
+
+    Attributes:
+        claim:            The original factual assertion text.
+        status:           "verified" | "inferred" | "unverified" | "conflict".
+        evidence_source:  Where the evidence came from:
+                          "tool" | "knowledge" | "reflexion" | None.
+        evidence_text:    Supporting or contradicting evidence text.
+        confidence:       Per-claim confidence score (0.0–1.0).
+    """
+
+    claim: str = ""
+    status: str = "unverified"
+    evidence_source: Optional[str] = None
+    evidence_text: Optional[str] = None
+    confidence: float = 0.0
+
+
+# Verdict constants
+VERDICT_PASS = "PASS"
+VERDICT_NEEDS_REVISION = "NEEDS_REVISION"
+VERDICT_UNRELIABLE = "UNRELIABLE"
+
+
+@dataclass
 class VerificationResult:
     """Output of Phase ③ Answer Verification Gate.
 
     Attributes:
-        verified:       True if the answer passed verification.
-        confidence:     Overall confidence score (0.0–1.0).
-        flagged_claims: Factual claims that could not be verified.
-        report:         Human-readable verification summary.
+        verdict:            "PASS" | "NEEDS_REVISION" | "UNRELIABLE".
+        claims:             Per-claim verification details.
+        revised_answer:     If NEEDS_REVISION, the corrected answer.
+        hallucination_score: 0.0 = fully reliable, 1.0 = fully hallucinated.
+        verified:           Backward-compat: True if verdict == "PASS".
+        confidence:         Backward-compat: overall confidence (0.0–1.0).
+        flagged_claims:     Backward-compat: list of unverified claim texts.
+        report:             Human-readable verification summary.
     """
 
+    verdict: str = VERDICT_PASS
+    claims: List[ClaimVerification] = field(default_factory=list)
+    revised_answer: Optional[str] = None
+    hallucination_score: float = 0.0
+    # Backward-compatible fields
     verified: bool = True
     confidence: float = 1.0
     flagged_claims: List[str] = field(default_factory=list)
