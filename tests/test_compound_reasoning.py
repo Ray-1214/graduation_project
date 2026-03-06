@@ -779,10 +779,10 @@ class TestReflexionMemoryIntegration:
 
     # ── 3.5-27  策略教訓 → LongTermMemory ────────────────────────────
 
-    def test_3_5_27_strategy_to_ltm(self):
+    def test_3_5_27_strategy_to_ltm(self, tmp_path):
         """教訓寫入 LongTermMemory，entry 含 'Reflexion'。"""
-        ltm = LongTermMemory(store_path=":memory:")
-        ks = KnowledgeStore(use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
         writer = ReflexionMemoryWriter(long_term=ltm, knowledge_store=ks)
 
         text = (
@@ -802,7 +802,7 @@ class TestReflexionMemoryIntegration:
 
     def test_3_5_28_knowledge_to_ks(self, tmp_path):
         """知識寫入 KnowledgeStore，entry 的 source='reflexion'。"""
-        ltm = LongTermMemory(store_path=":memory:")
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
         ks = KnowledgeStore(
             store_path=tmp_path / "ks.json", use_vectors=False,
         )
@@ -826,10 +826,10 @@ class TestReflexionMemoryIntegration:
 
     # ── 3.5-29  錯誤警告 → Skill Document ────────────────────────────
 
-    def test_3_5_29_warning_to_skill_doc(self):
+    def test_3_5_29_warning_to_skill_doc(self, tmp_path):
         """警告觸發 SkillDocumentUpdater。"""
-        ltm = LongTermMemory(store_path=":memory:")
-        ks = KnowledgeStore(use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
         updater = MagicMock()
         writer = ReflexionMemoryWriter(
             long_term=ltm, knowledge_store=ks, doc_updater=updater,
@@ -856,10 +856,10 @@ class TestReflexionMemoryIntegration:
 
     # ── 3.5-30  成功/失敗 confidence 不同 ────────────────────────────
 
-    def test_3_5_30_confidence_differs(self):
+    def test_3_5_30_confidence_differs(self, tmp_path):
         """成功任務 confidence=0.7；失敗任務=0.5。"""
-        ltm = LongTermMemory(store_path=":memory:")
-        ks = KnowledgeStore(use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
         writer = ReflexionMemoryWriter(long_term=ltm, knowledge_store=ks)
 
         text = "【策略教訓】\n- 一個重要教訓\n"
@@ -875,8 +875,8 @@ class TestReflexionMemoryIntegration:
         assert success_insights[0].confidence == 0.7
 
         # Failure
-        ltm2 = LongTermMemory(store_path=":memory:")
-        ks2 = KnowledgeStore(use_vectors=False)
+        ltm2 = LongTermMemory(store_path=str(tmp_path / "ltm2.json"))
+        ks2 = KnowledgeStore(store_path=tmp_path / "ks2.json", use_vectors=False)
         writer2 = ReflexionMemoryWriter(long_term=ltm2, knowledge_store=ks2)
         result_failure = writer2.process(
             text, _make_trace(task_id="t2", success=False), success=False,
@@ -891,7 +891,7 @@ class TestReflexionMemoryIntegration:
 
     def test_3_5_31_knowledge_deduplication(self, tmp_path):
         """相同知識重複寫入 → KnowledgeStore 中只有一條。"""
-        ltm = LongTermMemory(store_path=":memory:")
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
         ks = KnowledgeStore(
             store_path=tmp_path / "ks.json", use_vectors=False,
         )
@@ -922,10 +922,10 @@ class TestReflexionMemoryIntegration:
 
     # ── 3.5-32  舊格式相容 ───────────────────────────────────────────
 
-    def test_3_5_32_old_format_compatible(self):
+    def test_3_5_32_old_format_compatible(self, tmp_path):
         """沒有三段式結構 → 全文作為策略教訓寫入，不報錯。"""
-        ltm = LongTermMemory(store_path=":memory:")
-        ks = KnowledgeStore(use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
         writer = ReflexionMemoryWriter(long_term=ltm, knowledge_store=ks)
 
         old_text = "這次任務的反思：應該先分析再行動，不要急著搜尋。"
@@ -941,10 +941,10 @@ class TestReflexionMemoryIntegration:
 
     # ── 3.5-33  source 標記可查詢 ────────────────────────────────────
 
-    def test_3_5_33_source_queryable(self):
+    def test_3_5_33_source_queryable(self, tmp_path):
         """從 KnowledgeStore 查詢 source='reflexion' 的條目可篩選。"""
-        ks = KnowledgeStore(use_vectors=False)
-        ltm = LongTermMemory(store_path=":memory:")
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
         writer = ReflexionMemoryWriter(long_term=ltm, knowledge_store=ks)
 
         # Add reflexion knowledge
@@ -1055,10 +1055,10 @@ class TestIntegration:
 
     # ── 3.5-36  記憶標記驗證 ──────────────────────────────────────────
 
-    def test_3_5_36_memory_source_tags(self):
+    def test_3_5_36_memory_source_tags(self, tmp_path):
         """記憶中的 reflexion entries 都有 source='reflexion'。"""
-        ltm = LongTermMemory(store_path=":memory:")
-        ks = KnowledgeStore(use_vectors=False)
+        ltm = LongTermMemory(store_path=str(tmp_path / "ltm.json"))
+        ks = KnowledgeStore(store_path=tmp_path / "ks.json", use_vectors=False)
         writer = ReflexionMemoryWriter(long_term=ltm, knowledge_store=ks)
 
         # 3 rounds of reflexion
