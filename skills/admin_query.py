@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from skills.registry import BaseSkill
 
@@ -32,11 +32,15 @@ class AdminQuery(BaseSkill):
             knowledge_store: Optional :class:`KnowledgeStore` instance.
                              Created lazily if not provided.
             mode: ``"sync"`` (Mode A, CLI) or ``"async"`` (Mode B, API).
-                  Only ``"sync"`` is implemented in Phase 1.
         """
         self._knowledge_store = knowledge_store
         self._store_initialised = knowledge_store is not None
         self.mode = mode
+
+        # ── Async mode state (Mode B) ────────────────────────────────
+        # Maps query_id → {event, question, response, episode_id, ...}
+        self.pending_queries: Dict[str, Dict[str, Any]] = {}
+        self._query_counter = 0
 
     @property
     def name(self) -> str:
@@ -78,17 +82,69 @@ class AdminQuery(BaseSkill):
 
         return f"[Admin] {answer}"
 
-    # ── Mode B: Async placeholder (Phase 5) ──────────────────────────
+    # ── Mode B: Async API (Phase 5) ──────────────────────────────────
 
     def _execute_async(self, question: str) -> str:
-        """Write question to pending queue and return immediately."""
-        # Phase 5: write to pending_queries.json or database
-        # For now, fall back to sync mode with a warning
-        logger.warning(
-            "Async admin_query not yet implemented (Phase 5). "
-            "Falling back to sync mode."
-        )
-        return self._execute_sync(question)
+        """Post question to pending queue and block until admin responds.
+
+        The calling thread (agent executor) blocks on a
+        ``threading.Event`` until :meth:`set_response` or
+        :meth:`skip_query` is called from the API layer.
+        """
+        import threading
+        import uuid
+
+        query_id = f"q-{uuid.uuid4().hex[:12]}"
+        event = threading.Event()
+
+        self._query_counter += 1
+        self.pending_queries[query_id] = {
+            "query_id": query_id,
+            "question": question,
+            "event": event,
+            "response": None,
+            "skipped": False,
+            "timestamp": time.time(),
+            "context": "",
+        }
+
+        logger.info("Admin query posted: %s — %s", query_id, question)
+
+        # Notify WebSocket listeners (callback set by backend)
+        if hasattr(self, "_on_query_posted") and self._on_query_posted:
+            try:
+                self._on_query_posted(query_id, question)
+            except Exception:
+                pass
+
+        # Block until admin responds or skips (timeout 10 min)
+        event.wait(timeout=600)
+
+        entry = self.pending_queries.pop(query_id, {})
+        if entry.get("skipped"):
+            return "[Admin] (question skipped — try another approach)"
+        response = entry.get("response", "")
+        if not response:
+            return "[Admin] (no response — timed out after 10 minutes)"
+        return f"[Admin] {response}"
+
+    def set_response(self, query_id: str, response: str) -> bool:
+        """Set admin response for a pending query (called by API)."""
+        entry = self.pending_queries.get(query_id)
+        if not entry:
+            return False
+        entry["response"] = response
+        entry["event"].set()
+        return True
+
+    def skip_query(self, query_id: str) -> bool:
+        """Skip a pending query (called by API)."""
+        entry = self.pending_queries.get(query_id)
+        if not entry:
+            return False
+        entry["skipped"] = True
+        entry["event"].set()
+        return True
 
     # ── BaseSkill interface ──────────────────────────────────────────
 
