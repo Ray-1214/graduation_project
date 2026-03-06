@@ -288,6 +288,78 @@ class TestRun:
         assert call_kwargs.kwargs.get("use_rag") is True \
             or call_kwargs[1].get("use_rag") is True
 
+    def test_run_execute_mode(self, client, mock_agent):
+        """5-13: Execute mode should skip reflection."""
+        resp = client.post("/api/run", json={
+            "task_description": "Calculate 1+1",
+            "mode": "execute",
+        })
+        assert resp.status_code == 200
+        call_kwargs = mock_agent.run.call_args
+        assert call_kwargs.kwargs.get("do_reflect") is False \
+            or call_kwargs[1].get("do_reflect") is False
+
+    def test_run_auto_mode(self, client, mock_agent):
+        """5-13: Auto mode is the default."""
+        resp = client.post("/api/run", json={
+            "task_description": "What is 2+2?",
+            "mode": "auto",
+        })
+        assert resp.status_code == 200
+        call_kwargs = mock_agent.run.call_args
+        # strategy=None (auto), use_rag=False
+        assert call_kwargs.kwargs.get("strategy") is None \
+            or call_kwargs[1].get("strategy") is None
+
+    def test_run_invalid_json_422(self, client):
+        """5-14: Invalid JSON body should return 422."""
+        resp = client.post(
+            "/api/run",
+            content="not valid json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+
+    def test_episode_detail_completeness(self, client, mock_agent):
+        """5-15: EpisodeDetail must contain all compound_reasoning phases."""
+        resp = client.post("/api/run", json={
+            "task_description": "Full test",
+            "mode": "auto",
+            "expected_answer": "42",
+        })
+        assert resp.status_code == 200
+        d = resp.json()
+
+        # Top-level keys
+        for key in ["episode_id", "task", "timestamp", "duration_total_ms",
+                     "context_assembly", "compound_reasoning",
+                     "evolution", "metrics", "answer", "correct"]:
+            assert key in d, f"Missing key: {key}"
+
+        # compound_reasoning phases
+        cr = d["compound_reasoning"]
+        assert "strategy_selected" in cr
+        assert "phase_1_thinking" in cr
+        assert "phase_2_execution" in cr
+        assert "phase_3_verification" in cr
+        assert "phase_4_reflexion" in cr
+
+        # Phase 2 execution details
+        p2 = cr["phase_2_execution"]
+        assert "steps" in p2
+        assert "total_llm_calls" in p2
+        assert "total_tool_calls" in p2
+
+        # Phase 3 verification structure
+        p3 = cr["phase_3_verification"]
+        assert "verdict" in p3
+        assert "hallucination_guard" in p3
+
+        # Evolution structure
+        evo = d["evolution"]
+        assert "graph_ops" in evo
+        assert "graph_after" in evo
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  GET /api/history

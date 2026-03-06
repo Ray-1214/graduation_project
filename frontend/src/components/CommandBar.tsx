@@ -129,6 +129,24 @@ export function CommandBar() {
                     <Send size={16} />
                 </button>
             </div>
+
+            {/* 5-39: Command history */}
+            {commandHistory.length > 0 && (
+                <div className="flex items-center gap-2 mt-2 overflow-x-auto pb-1">
+                    {commandHistory.slice(-5).reverse().map((cmd, i) => (
+                        <button
+                            key={i}
+                            onClick={() => setInput(cmd.command)}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[hsl(var(--secondary))] text-[10px] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] transition-colors shrink-0 max-w-[200px]"
+                        >
+                            <span className="px-1 py-0 rounded bg-[hsl(var(--accent))] text-[9px]">
+                                {cmd.mode}
+                            </span>
+                            <span className="truncate">{cmd.command}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

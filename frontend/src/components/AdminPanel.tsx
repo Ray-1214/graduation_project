@@ -49,6 +49,16 @@ export function AdminPanel() {
                             <div className="flex items-start gap-2 mb-2">
                                 <span className="text-amber-400 text-sm">🤖</span>
                                 <p className="text-sm flex-1">{q.question}</p>
+                                {/* 5-45: Context link → selectEpisode */}
+                                {(q as any).episode_id !== undefined && (
+                                    <button
+                                        onClick={() => useStore.getState().selectEpisode((q as any).episode_id)}
+                                        className="text-[9px] px-1.5 py-0.5 rounded bg-[hsl(var(--secondary))] text-blue-400 hover:text-blue-300 transition-colors"
+                                        title="跳到這個 episode"
+                                    >
+                                        ep#{(q as any).episode_id}
+                                    </button>
+                                )}
                             </div>
                             <div className="flex items-end gap-2">
                                 <input

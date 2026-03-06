@@ -183,6 +183,7 @@ function PhaseContent({
     }
 
     if (phase === 'thinking') {
+        const th = cr.phase_1_thinking;
         return (
             <div className="space-y-2">
                 <div className="text-xs">
@@ -191,11 +192,21 @@ function PhaseContent({
                         <span className="text-[hsl(var(--muted-foreground))]"> — {cr.strategy_reason}</span>
                     )}
                 </div>
-                {cr.phase_1_thinking.parsed_result.content && (
-                    <pre className="text-[10px] bg-[hsl(var(--accent))] rounded p-2 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                        {cr.phase_1_thinking.parsed_result.content}
-                    </pre>
-                )}
+                {/* 5-24: Dual pane — prompt / response */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div>
+                        <div className="text-[9px] uppercase text-[hsl(var(--muted-foreground))] mb-1">Prompt Sent</div>
+                        <pre className="text-[10px] bg-[hsl(var(--accent))] rounded p-2 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            {(th as any).prompt_sent || '(not captured)'}
+                        </pre>
+                    </div>
+                    <div>
+                        <div className="text-[9px] uppercase text-[hsl(var(--muted-foreground))] mb-1">LLM Response</div>
+                        <pre className="text-[10px] bg-[hsl(var(--accent))] rounded p-2 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            {(th as any).llm_response || th.parsed_result.content || '(not captured)'}
+                        </pre>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -238,10 +249,12 @@ function PhaseContent({
 
     if (phase === 'verification') {
         const v = cr.phase_3_verification;
+        const hg = v.hallucination_guard;
+        const claims = (hg as any).claims || [];
         return (
             <div className="space-y-2">
                 <div className="flex items-center gap-2 text-xs">
-                    <span>Verdict:</span>
+                    <span>Self-check verdict:</span>
                     <span
                         className={cn(
                             'px-1.5 py-0.5 rounded text-[10px] font-medium',
@@ -254,19 +267,29 @@ function PhaseContent({
                     >
                         {v.verdict}
                     </span>
-                </div>
-                <div className="text-[10px]">
-                    Hallucination score:{' '}
-                    <span
-                        className={cn(
-                            v.hallucination_guard.hallucination_detected
-                                ? 'text-red-400'
-                                : 'text-green-400',
-                        )}
-                    >
-                        {v.hallucination_guard.overall_score.toFixed(2)}
+                    <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                        confidence: <span className={cn(
+                            hg.hallucination_detected ? 'text-red-400' : 'text-green-400',
+                        )}>{hg.overall_score.toFixed(2)}</span>
                     </span>
                 </div>
+                {/* 5-27: Claims / evidence table */}
+                {claims.length > 0 && (
+                    <div className="text-[10px]">
+                        <div className="grid grid-cols-3 gap-1 font-semibold text-[hsl(var(--muted-foreground))] border-b border-[hsl(var(--border))] pb-1 mb-1">
+                            <span>Claim</span><span>Evidence</span><span>Verdict</span>
+                        </div>
+                        {claims.map((c: any, i: number) => (
+                            <div key={i} className="grid grid-cols-3 gap-1 py-0.5">
+                                <span className="truncate">{c.claim}</span>
+                                <span className="truncate text-[hsl(var(--muted-foreground))]">{c.evidence || '—'}</span>
+                                <span className={cn(
+                                    c.supported ? 'text-green-400' : 'text-red-400'
+                                )}>{c.supported ? '✅ supported' : '❌ unsupported'}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         );
     }
@@ -448,9 +471,10 @@ export function ProcessInspector() {
                         </pre>
                     ) : (
                         <div className="space-y-2">
-                            <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
-                                All LLM calls in episode #{currentEpisode.episode_id}:
-                            </p>
+                            {/* 5-31: LLM Calls with phase, tokens, duration */}
+                            <div className="grid grid-cols-5 gap-1 text-[9px] font-semibold uppercase text-[hsl(var(--muted-foreground))] border-b border-[hsl(var(--border))] pb-1">
+                                <span>#</span><span>Phase</span><span>Tokens In</span><span>Tokens Out</span><span>Duration</span>
+                            </div>
                             {currentEpisode.compound_reasoning.phase_2_execution.steps
                                 .filter((s) => s.type === 'thought' || s.type === 'final_answer')
                                 .map((step, i) => (
@@ -458,8 +482,12 @@ export function ProcessInspector() {
                                         key={i}
                                         className="rounded bg-[hsl(var(--secondary))] p-2 text-[10px]"
                                     >
-                                        <div className="flex justify-between text-[hsl(var(--muted-foreground))]">
-                                            <span>#{i + 1} [{step.type}]</span>
+                                        <div className="grid grid-cols-5 gap-1 text-[hsl(var(--muted-foreground))]">
+                                            <span>{i + 1}</span>
+                                            <span className="text-yellow-400">{(step as any).phase || step.type}</span>
+                                            <span>{(step as any).tokens_in ?? '—'}</span>
+                                            <span>{(step as any).tokens_out ?? '—'}</span>
+                                            <span>{step.duration_ms ? `${step.duration_ms}ms` : '—'}</span>
                                         </div>
                                         <p className="mt-1 whitespace-pre-wrap">{step.content}</p>
                                     </div>

@@ -131,7 +131,16 @@ export function GraphView() {
             .append('title')
             .text(
                 (d) =>
-                    `${d.name || d.id}\nutility: ${d.utility?.toFixed(2) ?? '—'}\ntier: ${d.tier || '—'}\nfreq: ${d.frequency ?? '—'}`,
+                    [
+                        d.name || d.id,
+                        `utility: ${d.utility?.toFixed(2) ?? '—'}`,
+                        `tier: ${d.tier || '—'}`,
+                        `frequency: ${d.frequency ?? '—'}`,
+                        `policy: ${(d as any).policy ?? '—'}`,
+                        `reinforcement: ${(d as any).reinforcement ?? '—'}`,
+                        `cost: ${(d as any).cost ?? '—'}`,
+                        `version: ${(d as any).version ?? '—'}`,
+                    ].join('\n'),
             );
 
         // Tick
