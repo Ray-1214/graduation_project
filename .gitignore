@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+lib/python*/
 lib64/
 parts/
 sdist/
@@ -169,3 +169,8 @@ rag/knowledge_base/*.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Frontend build artifacts (keep src/ tracked)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
