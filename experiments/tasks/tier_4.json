@@ -1,0 +1,212 @@
+[
+    {
+        "id": "t4-001",
+        "tier": 4,
+        "task_description": "Design a rate limiter for a REST API that supports both token bucket and sliding window algorithms. Explain the trade-offs, provide pseudocode for both, and recommend which to use for a social media feed endpoint handling 10K req/s.",
+        "expected_answer": "Token bucket: bursty traffic friendly, simple. Sliding window: smoother rate limiting, more memory. Social media feed: token bucket for burst tolerance during viral content.",
+        "complexity": 4,
+        "tags": [
+            "system_design",
+            "algorithms",
+            "comparison",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-002",
+        "tier": 4,
+        "task_description": "Debug this Python code that's supposed to implement a thread-safe singleton but has a race condition: class Singleton:\\n    _instance = None\\n    def __new__(cls):\\n        if cls._instance is None:\\n            cls._instance = super().__new__(cls)\\n        return cls._instance. Fix it and explain the double-checked locking pattern.",
+        "expected_answer": "Race condition: two threads can both see _instance is None. Fix: use threading.Lock() with double-checked locking — check, acquire lock, check again, create.",
+        "complexity": 4,
+        "tags": [
+            "debugging",
+            "concurrency",
+            "design_pattern",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-003",
+        "tier": 4,
+        "task_description": "A distributed system uses eventual consistency. A user updates their profile on server A, then immediately reads from server B and sees stale data. Design a solution that balances consistency and availability, considering CAP theorem constraints. Include sequence diagrams.",
+        "expected_answer": "Options: read-your-writes consistency via sticky sessions, version vectors, or causal consistency. Trade-off: stronger consistency = higher latency. Recommend: session-based consistency with async replication.",
+        "complexity": 4,
+        "tags": [
+            "distributed_systems",
+            "system_design",
+            "debugging",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-004",
+        "tier": 4,
+        "task_description": "Analyze the time and space complexity of this recursive Fibonacci implementation, then optimize it using three different approaches (memoization, tabulation, matrix exponentiation). Compare their complexities.",
+        "expected_answer": "Naive: O(2^n) time, O(n) space. Memoization: O(n)/O(n). Tabulation: O(n)/O(1). Matrix exponentiation: O(log n)/O(1). For large n: matrix exponentiation wins.",
+        "complexity": 4,
+        "tags": [
+            "algorithms",
+            "optimization",
+            "comparison",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-005",
+        "tier": 4,
+        "task_description": "Design a data pipeline that ingests 1TB/day of IoT sensor data, detects anomalies in real-time, stores historical data for analysis, and generates daily reports. Specify technologies, architecture, and failure handling.",
+        "expected_answer": "Kafka for ingestion, Flink/Spark Streaming for anomaly detection, S3/HDFS for storage, Presto/Trino for analysis. Failure: Kafka replay, checkpoint recovery, dead letter queues.",
+        "complexity": 4,
+        "tags": [
+            "data_engineering",
+            "system_design",
+            "architecture",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-006",
+        "tier": 4,
+        "task_description": "A machine learning model has 95% accuracy on test data but 60% in production. Diagnose possible causes by analyzing the ML lifecycle, propose solutions for each cause, and design a monitoring system to detect future drift.",
+        "expected_answer": "Causes: data drift, concept drift, train-test leakage, covariate shift, feature pipeline bugs. Solutions: monitoring distributions, shadow deployment, A/B testing, feature stores. Monitoring: statistical tests on input distributions.",
+        "complexity": 4,
+        "tags": [
+            "machine_learning",
+            "debugging",
+            "system_design",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-007",
+        "tier": 4,
+        "task_description": "Compare microservices vs monolithic architecture for a startup building an e-commerce platform. Consider: team size (5 developers), expected growth to 100K users/month, budget constraints. Include migration strategy if starting with monolith.",
+        "expected_answer": "Start monolith: small team, faster iteration, lower ops overhead. Plan domain boundaries for future extraction. Migrate when: team grows >15, specific services need independent scaling. Strategy: strangler fig pattern.",
+        "complexity": 4,
+        "tags": [
+            "architecture",
+            "business_analysis",
+            "strategy",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-008",
+        "tier": 4,
+        "task_description": "Implement a custom LRU cache in Python that is thread-safe, supports TTL (time-to-live) for entries, and has O(1) get/put operations. Then analyze potential memory leak scenarios and add safeguards.",
+        "expected_answer": "Use OrderedDict + threading.Lock + expiry timestamp per entry. Memory leak scenarios: TTL cleanup not happening (need background reaper), circular references. Safeguards: max size, periodic cleanup, weakref for values.",
+        "complexity": 4,
+        "tags": [
+            "data_structures",
+            "concurrency",
+            "implementation",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-009",
+        "tier": 4,
+        "task_description": "A SQL query that joins 4 tables is taking 30 seconds. Given the EXPLAIN output showing sequential scans on two tables (1M and 5M rows), diagnose the performance issue, propose index strategies, query rewrites, and estimate the improvement.",
+        "expected_answer": "Issues: missing indexes on join columns, sequential scans on large tables. Solutions: composite indexes on join columns, analyze query plan, consider materialized views. Estimated improvement: 30s → <1s with proper indexes.",
+        "complexity": 4,
+        "tags": [
+            "databases",
+            "performance",
+            "debugging",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-010",
+        "tier": 4,
+        "task_description": "Design a search engine for a 10M document corpus that supports full-text search, faceted filtering, autocomplete, and relevance tuning. Compare inverted index vs vector search approaches and propose a hybrid architecture.",
+        "expected_answer": "Inverted index (Elasticsearch): exact matching, filtering, facets. Vector search (FAISS/Milvus): semantic similarity. Hybrid: inverted index for filtering + vector reranking. Architecture: query → filter → retrieve → rerank.",
+        "complexity": 4,
+        "tags": [
+            "search",
+            "system_design",
+            "architecture",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-011",
+        "tier": 4,
+        "task_description": "Analyze the security vulnerabilities in this authentication flow: user sends username + password over HTTPS, server checks DB, returns JWT stored in localStorage. Identify at least 5 vulnerabilities and propose fixes.",
+        "expected_answer": "1. XSS can steal localStorage JWT (use httpOnly cookies). 2. No rate limiting (add). 3. Plain password comparison (use bcrypt). 4. No token expiry/refresh. 5. No CSRF protection. 6. Missing input validation (SQL injection).",
+        "complexity": 4,
+        "tags": [
+            "security",
+            "code_review",
+            "web",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-012",
+        "tier": 4,
+        "task_description": "Design a real-time collaborative editing system like Google Docs. Address: conflict resolution (OT vs CRDT), cursor synchronization, offline editing, and scalability to 100 concurrent editors per document.",
+        "expected_answer": "CRDT preferred for eventual consistency without central server. OT for lower latency with server coordination. Cursor: presence protocol via WebSocket. Offline: local CRDT operations, merge on reconnect. Scale: document partitioning.",
+        "complexity": 4,
+        "tags": [
+            "distributed_systems",
+            "system_design",
+            "algorithms",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-013",
+        "tier": 4,
+        "task_description": "A company's Kubernetes cluster has pods randomly crashing with OOMKilled errors. CPU usage is normal but memory grows over time. Debug the issue: examine possible causes across application code, container settings, and cluster configuration, then propose a remediation plan.",
+        "expected_answer": "Causes: memory leak in application (unbounded cache, connection pool growth), incorrect resource limits, JVM heap too large for container, no HPA. Plan: profile heap, set proper limits, add memory-based HPA, implement circuit breakers.",
+        "complexity": 4,
+        "tags": [
+            "devops",
+            "debugging",
+            "kubernetes",
+            "compound"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t4-014",
+        "tier": 4,
+        "task_description": "Implement a simple blockchain in Python with: block structure (hash, prev_hash, data, nonce), proof-of-work (adjustable difficulty), chain validation, and tamper detection. Then analyze the energy vs security trade-off of different difficulty levels.",
+        "expected_answer": "Block: SHA-256(prev_hash + data + nonce). PoW: find nonce where hash starts with N zeros. Validation: verify chain integrity and PoW. Trade-off: higher difficulty = more energy but exponentially harder to attack (51% attack cost).",
+        "complexity": 4,
+        "tags": [
+            "blockchain",
+            "implementation",
+            "analysis",
+            "compound"
+        ],
+        "requires_tools": false
+    },
+    {
+        "id": "t4-015",
+        "tier": 4,
+        "task_description": "Design an A/B testing framework that handles: statistical significance calculation (frequentist and Bayesian), multi-armed bandit exploration, guardrail metrics, and automated early stopping. Include the mathematical foundations.",
+        "expected_answer": "Frequentist: z-test/chi-squared, p<0.05, power analysis for sample size. Bayesian: Beta posteriors, credible intervals. MAB: Thompson sampling for exploration/exploitation. Guardrails: SRM check, novelty effects. Early stopping: alpha spending functions.",
+        "complexity": 4,
+        "tags": [
+            "statistics",
+            "system_design",
+            "mathematics",
+            "compound"
+        ],
+        "requires_tools": true
+    }
+]

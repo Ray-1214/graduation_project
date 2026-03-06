@@ -1,0 +1,212 @@
+[
+    {
+        "id": "t3-001",
+        "tier": 3,
+        "task_description": "Search for the current GDP of Japan and South Korea, then calculate the ratio and analyze which economy grew faster in the last decade.",
+        "expected_answer": "Japan GDP ~$4.2T, South Korea ~$1.7T. Ratio ~2.5:1. South Korea grew faster (~3-4% avg vs Japan ~1%).",
+        "complexity": 3,
+        "tags": [
+            "economics",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-002",
+        "tier": 3,
+        "task_description": "Find the top 3 most-cited papers on transformer architectures, summarize their key contributions, and identify common themes.",
+        "expected_answer": "Attention Is All You Need (self-attention), BERT (bidirectional pretraining), GPT (autoregressive pretraining). Common: attention mechanisms, transfer learning.",
+        "complexity": 3,
+        "tags": [
+            "research",
+            "search",
+            "summarization",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-003",
+        "tier": 3,
+        "task_description": "Look up the current exchange rates for USD/EUR, USD/JPY, and EUR/JPY. Verify if the cross-rate is consistent (no triangular arbitrage opportunity).",
+        "expected_answer": "USD/EUR × EUR/JPY should approximately equal USD/JPY. Small discrepancies exist but are within transaction cost margins.",
+        "complexity": 3,
+        "tags": [
+            "finance",
+            "search",
+            "verification",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-004",
+        "tier": 3,
+        "task_description": "Search for Python's asyncio documentation, then write a function that fetches 5 URLs concurrently and returns their response times, sorted fastest to slowest.",
+        "expected_answer": "async def fetch_all(urls): use asyncio.gather with aiohttp sessions, measure time per request, sort by elapsed time.",
+        "complexity": 3,
+        "tags": [
+            "programming",
+            "search",
+            "implementation",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-005",
+        "tier": 3,
+        "task_description": "Find the population growth rates of India and China over the last 20 years. Project when India's population will surpass China's (if not already).",
+        "expected_answer": "India surpassed China around 2023. India growth ~1.0%/yr declining, China ~0.3% and now negative.",
+        "complexity": 3,
+        "tags": [
+            "demographics",
+            "search",
+            "projection",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-006",
+        "tier": 3,
+        "task_description": "Search for the latest IPCC report summary, extract the key temperature projections, and calculate the emission reduction needed to stay below 1.5°C.",
+        "expected_answer": "Need ~45% reduction from 2010 levels by 2030, net-zero by 2050. Current trajectory: 2.5-3°C by 2100.",
+        "complexity": 3,
+        "tags": [
+            "climate",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-007",
+        "tier": 3,
+        "task_description": "Find three open-source alternatives to Redis, compare their performance characteristics, and recommend one for a write-heavy workload with 10M keys.",
+        "expected_answer": "KeyDB (multithreaded Redis fork), Dragonfly (multi-threaded), Garnet (.NET). For write-heavy: KeyDB or Dragonfly for multi-threaded write performance.",
+        "complexity": 3,
+        "tags": [
+            "technology",
+            "search",
+            "comparison",
+            "recommendation"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-008",
+        "tier": 3,
+        "task_description": "Search for the nutritional content of a Big Mac in 5 different countries. Analyze the calorie differences and hypothesize reasons.",
+        "expected_answer": "Varies 490-560 kcal depending on country. Differences due to: portion size, ingredient sourcing, local regulations, recipe adaptations.",
+        "complexity": 3,
+        "tags": [
+            "nutrition",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-009",
+        "tier": 3,
+        "task_description": "Look up the sorting algorithm time complexities, then analyze which algorithm would be best for sorting 1M nearly-sorted integers and explain why.",
+        "expected_answer": "Timsort (Python's default) — O(n) for nearly sorted data. Insertion sort also O(n) but Timsort handles mixed runs better at scale.",
+        "complexity": 3,
+        "tags": [
+            "algorithms",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-010",
+        "tier": 3,
+        "task_description": "Find the current interest rates of the Federal Reserve, ECB, and Bank of Japan. Explain the carry trade implications between USD/JPY.",
+        "expected_answer": "Fed ~5.25-5.5%, ECB ~4.5%, BoJ ~0-0.1%. Large USD-JPY rate differential incentivizes borrowing yen to invest in USD assets (carry trade).",
+        "complexity": 3,
+        "tags": [
+            "finance",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-011",
+        "tier": 3,
+        "task_description": "Search for the latest benchmarks comparing GPT-4, Claude, and Gemini on coding tasks. Summarize which model excels in which areas.",
+        "expected_answer": "Performance varies by benchmark. Generally competitive across HumanEval, MBPP. Differences in long-context handling, instruction following, and reasoning depth.",
+        "complexity": 3,
+        "tags": [
+            "ai",
+            "search",
+            "comparison",
+            "summarization"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-012",
+        "tier": 3,
+        "task_description": "Find the earthquake magnitude scale definitions, then classify 5 historical earthquakes by their impact level and explain the logarithmic relationship.",
+        "expected_answer": "Richter/moment magnitude is log10. Each whole number = 10x amplitude, ~31.6x energy. Examples: 2011 Tohoku (9.1), 2010 Haiti (7.0), etc.",
+        "complexity": 3,
+        "tags": [
+            "geology",
+            "search",
+            "classification",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-013",
+        "tier": 3,
+        "task_description": "Search for Docker best practices, then review this Dockerfile and suggest 3 improvements: FROM ubuntu:latest\\nRUN apt-get update\\nCOPY . /app\\nRUN pip install -r /app/requirements.txt\\nCMD python /app/main.py",
+        "expected_answer": "1. Use specific tag (not :latest). 2. Combine RUN layers, add apt-get clean. 3. Use multi-stage build or slim base. 4. COPY requirements first for cache. 5. Use ENTRYPOINT.",
+        "complexity": 3,
+        "tags": [
+            "devops",
+            "search",
+            "code_review",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-014",
+        "tier": 3,
+        "task_description": "Look up the CAP theorem, then analyze whether MongoDB, Cassandra, and PostgreSQL prioritize C, A, or P, and explain the trade-offs for an e-commerce platform.",
+        "expected_answer": "MongoDB: CP (consistency + partition tolerance). Cassandra: AP (availability + partition tolerance). PostgreSQL: CA (single node). E-commerce: needs consistency for orders (CP/CA).",
+        "complexity": 3,
+        "tags": [
+            "databases",
+            "search",
+            "analysis",
+            "multi_step"
+        ],
+        "requires_tools": true
+    },
+    {
+        "id": "t3-015",
+        "tier": 3,
+        "task_description": "Search for the history of Moore's Law, find current transistor counts for the latest chips, and assess whether the law still holds.",
+        "expected_answer": "Moore's Law: transistor count doubles ~2 years. Latest chips: >100B transistors. Pace has slowed but continues through architectural innovations (3D stacking, chiplets).",
+        "complexity": 3,
+        "tags": [
+            "technology",
+            "search",
+            "analysis",
+            "trend"
+        ],
+        "requires_tools": true
+    }
+]

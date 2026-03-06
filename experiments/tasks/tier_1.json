@@ -1,0 +1,137 @@
+[
+  {
+    "id": "t1-001",
+    "tier": 1,
+    "task_description": "What is 15 * 23?",
+    "expected_answer": "345",
+    "complexity": 1,
+    "tags": ["arithmetic", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-002",
+    "tier": 1,
+    "task_description": "What is the capital of France?",
+    "expected_answer": "Paris",
+    "complexity": 1,
+    "tags": ["geography", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-003",
+    "tier": 1,
+    "task_description": "Translate 'Good morning' to Japanese.",
+    "expected_answer": "おはようございます",
+    "complexity": 1,
+    "tags": ["translation", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-004",
+    "tier": 1,
+    "task_description": "What is 256 / 16?",
+    "expected_answer": "16",
+    "complexity": 1,
+    "tags": ["arithmetic", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-005",
+    "tier": 1,
+    "task_description": "Convert 100 degrees Celsius to Fahrenheit.",
+    "expected_answer": "212",
+    "complexity": 1,
+    "tags": ["unit_conversion", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-006",
+    "tier": 1,
+    "task_description": "What is the chemical symbol for gold?",
+    "expected_answer": "Au",
+    "complexity": 1,
+    "tags": ["chemistry", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-007",
+    "tier": 1,
+    "task_description": "How many days are in a leap year?",
+    "expected_answer": "366",
+    "complexity": 1,
+    "tags": ["calendar", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-008",
+    "tier": 1,
+    "task_description": "What is the square root of 144?",
+    "expected_answer": "12",
+    "complexity": 1,
+    "tags": ["arithmetic", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-009",
+    "tier": 1,
+    "task_description": "Translate 'Thank you' to French.",
+    "expected_answer": "Merci",
+    "complexity": 1,
+    "tags": ["translation", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-010",
+    "tier": 1,
+    "task_description": "What is the largest planet in our solar system?",
+    "expected_answer": "Jupiter",
+    "complexity": 1,
+    "tags": ["astronomy", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-011",
+    "tier": 1,
+    "task_description": "What is 7! (7 factorial)?",
+    "expected_answer": "5040",
+    "complexity": 1,
+    "tags": ["arithmetic", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-012",
+    "tier": 1,
+    "task_description": "What year did World War II end?",
+    "expected_answer": "1945",
+    "complexity": 1,
+    "tags": ["history", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-013",
+    "tier": 1,
+    "task_description": "Convert 1 kilometer to meters.",
+    "expected_answer": "1000",
+    "complexity": 1,
+    "tags": ["unit_conversion", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-014",
+    "tier": 1,
+    "task_description": "What is the boiling point of water in Celsius?",
+    "expected_answer": "100",
+    "complexity": 1,
+    "tags": ["physics", "factual", "single_step"],
+    "requires_tools": false
+  },
+  {
+    "id": "t1-015",
+    "tier": 1,
+    "task_description": "How many continents are there on Earth?",
+    "expected_answer": "7",
+    "complexity": 1,
+    "tags": ["geography", "factual", "single_step"],
+    "requires_tools": false
+  }
+]
