@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -695,6 +695,52 @@ async def api_status():
         "episodes_completed": len(_episode_history),
         "graph_size": len(agent.skill_graph) if agent else 0,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  POST /api/graph/save — persist SkillGraph + MemoryPartition
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/api/graph/save")
+async def api_save_graph():
+    """Manually trigger SkillGraph persistence."""
+    agent = _get_agent()
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    try:
+        agent.save_state()
+        return {
+            "status": "saved",
+            "skills": len(agent.skill_graph),
+            "edges": agent.skill_graph._graph.number_of_edges(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  GET /api/graph/load — reload from disk (development use)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/graph/load")
+async def api_reload_graph():
+    """Reload SkillGraph and MemoryPartition from disk."""
+    agent = _get_agent()
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    try:
+        from skill_graph.skill_graph import SkillGraph
+        from skill_graph.memory_partition import MemoryPartition
+
+        agent.skill_graph = SkillGraph.load(agent._graph_path)
+        agent.memory_partition = MemoryPartition.load(agent._partition_path)
+        return {
+            "status": "reloaded",
+            "skills": len(agent.skill_graph),
+            "edges": agent.skill_graph._graph.number_of_edges(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ═══════════════════════════════════════════════════════════════════

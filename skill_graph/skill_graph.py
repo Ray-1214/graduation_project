@@ -20,14 +20,19 @@ Structural capacity:
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Set
 
 import networkx as nx  # type: ignore
 
 from skill_graph.skill_node import SkillNode
+
+logger = logging.getLogger(__name__)
 
 EdgeType = Literal["co_occurrence", "dependency", "abstraction"]
 
@@ -284,6 +289,79 @@ class SkillGraph:
             "nodes": nodes,
             "edges": edges,
         }
+
+    # ── Persistence ──────────────────────────────────────────────────
+
+    def save(self, path: Path) -> None:
+        """Persist the graph to a JSON file.
+
+        Args:
+            path: File path to save to.  Parent directories are created
+                  automatically if they do not exist.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = self.snapshot()
+        path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info(
+            "SkillGraph saved to %s (%d skills, %d edges)",
+            path, len(self), self._graph.number_of_edges(),
+        )
+
+    @classmethod
+    def load(cls, path: Path, capacity: int = 100) -> "SkillGraph":
+        """Restore a SkillGraph from a JSON file.
+
+        Args:
+            path:     File path to load from.
+            capacity: Capacity *K* for the new graph instance.
+
+        Returns:
+            A populated :class:`SkillGraph`.  If *path* does not exist or
+            cannot be parsed, an empty graph is returned instead of
+            raising an exception.
+        """
+        path = Path(path)
+        if not path.exists():
+            logger.info("No saved graph at %s — starting fresh.", path)
+            return cls(capacity=capacity)
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to load graph from %s: %s", path, exc)
+            return cls(capacity=capacity)
+
+        graph = cls(capacity=capacity)
+
+        # Restore nodes
+        for node_dict in data.get("nodes", []):
+            try:
+                skill = SkillNode.from_dict(node_dict)
+                graph.add_skill(skill)
+            except Exception as exc:
+                logger.warning("Skipping invalid node %s: %s", node_dict, exc)
+
+        # Restore edges
+        for edge in data.get("edges", []):
+            try:
+                graph.add_edge(
+                    edge["src"],
+                    edge["dst"],
+                    weight=edge.get("weight", 1.0),
+                    edge_type=edge.get("edge_type", "co_occurrence"),
+                )
+            except (KeyError, ValueError) as exc:
+                logger.warning("Skipping invalid edge %s: %s", edge, exc)
+
+        logger.info(
+            "SkillGraph loaded from %s (%d skills, %d edges)",
+            path, len(graph), graph._graph.number_of_edges(),
+        )
+        return graph
 
     # ── Dunder ───────────────────────────────────────────────────────
 

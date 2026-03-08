@@ -32,13 +32,18 @@ Tier transitions with hysteresis (prevents oscillation at boundaries):
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Literal
 
 if TYPE_CHECKING:
     from skill_graph.skill_graph import SkillGraph
 
 from skill_graph.skill_node import SkillNode
+
+logger = logging.getLogger(__name__)
 
 Tier = Literal["active", "cold", "archive"]
 
@@ -168,7 +173,67 @@ class MemoryPartition:
         """Stop tracking a skill (e.g. after graph removal)."""
         self._tiers.pop(skill_id, None)
 
-    # ── Diagnostics ──────────────────────────────────────────────────
+    # ── Persistence ──────────────────────────────────────────────────
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Export partition state for persistence."""
+        return {
+            "theta_high": self.theta_high,
+            "theta_low": self.theta_low,
+            "epsilon_h": self.epsilon_h,
+            "epsilon_l": self.epsilon_l,
+            "tiers": dict(self._tiers),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MemoryPartition":
+        """Restore partition from a serialised dict."""
+        partition = cls(
+            theta_high=data.get("theta_high", 0.7),
+            theta_low=data.get("theta_low", 0.3),
+            epsilon_h=data.get("epsilon_h", 0.1),
+            epsilon_l=data.get("epsilon_l", 0.1),
+        )
+        partition._tiers = data.get("tiers", {})
+        return partition
+
+    def save(self, path: Path) -> None:
+        """Persist partition state to a JSON file.
+
+        Args:
+            path: Target file path.  Parent dirs created automatically.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("MemoryPartition saved to %s (%s)", path, self.summary())
+
+    @classmethod
+    def load(cls, path: Path, **kwargs: Any) -> "MemoryPartition":
+        """Load partition from a JSON file.
+
+        Args:
+            path:     File to read.
+            **kwargs: Forwarded to ``cls()`` when the file is missing.
+
+        Returns:
+            A restored :class:`MemoryPartition`, or a fresh default
+            instance if the file does not exist or is corrupt.
+        """
+        path = Path(path)
+        if not path.exists():
+            logger.info("No partition file at %s — using defaults.", path)
+            return cls(**kwargs)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return cls.from_dict(data)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to load partition from %s: %s", path, exc)
+            return cls(**kwargs)
+
 
     def summary(self) -> Dict[str, int]:
         """Return counts per tier."""

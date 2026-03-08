@@ -17,14 +17,16 @@ Phase 3.5 additions:
 
 from __future__ import annotations
 
+import atexit
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.config import Config
-from core.llm_interface import BaseLLM, LlamaCppLLM
+from core.llm_interface import BaseLLM, LlamaCppLLM, ModelManager
 from core.prompt_builder import PromptBuilder
 from memory.episodic_log import EpisodicLog, convert_log_to_trace
 from memory.long_term import LongTermMemory
@@ -56,6 +58,58 @@ from skill_graph.skill_retriever import SkillRetriever
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Adapter: wraps ModelManager to satisfy the BaseLLM protocol
+# ---------------------------------------------------------------------------
+
+class ModelManagerAdapter(BaseLLM):
+    """Adapts :class:`ModelManager` to the :class:`BaseLLM` interface.
+
+    Existing reasoning strategies (CoT, ToT, ReAct …) depend on
+    ``BaseLLM.generate()``.  This thin adapter forwards calls to
+    ``ModelManager.generate()`` with a fixed *role* so that strategies
+    work unchanged.
+
+    Args:
+        manager: The shared :class:`ModelManager` instance.
+        role:    Default role for generation (``"thinking"`` or ``"coding"``).
+    """
+
+    def __init__(self, manager: ModelManager, role: str = "thinking") -> None:
+        self._manager = manager
+        self._role = role
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[List[str]] = None,
+    ) -> str:
+        kwargs: Dict[str, Any] = {}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if stop is not None:
+            kwargs["stop"] = stop
+        return self._manager.generate(prompt, role=self._role, **kwargs)
+
+    def generate_batch(
+        self,
+        prompts: List[str],
+        **kwargs: Any,
+    ) -> List[str]:
+        return [self.generate(p, **kwargs) for p in prompts]
+
+    def __repr__(self) -> str:
+        return f"ModelManagerAdapter(role={self._role!r}, manager={self._manager!r})"
+
+
 @dataclass
 class AgentResult:
     """Structured result from a reasoning episode."""
@@ -78,8 +132,28 @@ class MainAgent:
     def __init__(self, config: Optional[Config] = None) -> None:
         self.config = config or Config.default()
 
-        # Core
-        self.llm: BaseLLM = LlamaCppLLM(self.config)
+        # ── Core: LLM (single-model or dual-model) ───────────────
+        self.model_manager: Optional[ModelManager] = None
+        self.coding_coprocessor: Optional["CodingCoprocessor"] = None  # noqa: F821
+
+        if self.config.model_swap_enabled:
+            # Dual-model mode: ModelManager + CodingCoprocessor
+            from core.coding_coprocessor import CodingCoprocessor
+
+            self.model_manager = ModelManager(self.config)
+            self.llm: BaseLLM = ModelManagerAdapter(
+                self.model_manager, role="thinking",
+            )
+            self.coding_coprocessor = CodingCoprocessor(self.model_manager)
+            logger.info(
+                "Dual-model mode: thinking=%s, coding=%s",
+                self.config.model_path, self.config.code_model_path,
+            )
+        else:
+            # Single-model mode: backwards-compatible
+            self.llm = LlamaCppLLM(self.config)
+            logger.info("Single-model mode: %s", self.config.model_path)
+
         self.pb = PromptBuilder()
 
         # Memory
@@ -110,6 +184,14 @@ class MainAgent:
         self.skills.register(WebSearch(knowledge_store=self.knowledge_store))
         self.skills.register(AdminQuery(knowledge_store=self.knowledge_store))
 
+        # Coding skills (Phase 5.5 — only when coprocessor is active)
+        if self.coding_coprocessor is not None:
+            from skills.code_writer import CodeWriter
+            from skills.code_executor import CodeExecutor
+            self.skills.register(CodeWriter(self.coding_coprocessor))
+            self.skills.register(CodeExecutor())
+            logger.info("Coding skills registered: code_writer, code_executor")
+
         # Reasoning strategies
         self.planner = StrategyPlanner()
         self.cot = ChainOfThought(self.llm, self.pb)
@@ -128,14 +210,21 @@ class MainAgent:
         # Evaluator
         self.evaluator = EvaluatorAgent(self.llm, self.pb)
 
-        # Skill Graph + Evolution (Phase 2)
-        self.skill_graph = SkillGraph()
-        self.memory_partition = MemoryPartition(
+        # Skill Graph + Evolution (Phase 2) — with auto-persistence
+        self._graph_path = Path("skill_graph/data/skill_graph.json")
+        self._partition_path = Path("skill_graph/data/memory_partition.json")
+
+        self.skill_graph = SkillGraph.load(self._graph_path)
+        self.memory_partition = MemoryPartition.load(
+            self._partition_path,
             theta_high=0.7, theta_low=0.3,
             epsilon_h=0.05, epsilon_l=0.05,
         )
         self.evolution = EvolutionOperator()
         self.skill_retriever = SkillRetriever(top_k=3)
+
+        # Safety-net: persist on interpreter exit
+        atexit.register(self.save_state)
 
         # ── Phase 3.5: Compound Reasoning Pipeline ───────────────
         self.hallucination_guard = HallucinationGuard(
@@ -164,6 +253,16 @@ class MainAgent:
         )
 
     # ── public API ───────────────────────────────────────────────────
+
+    def save_state(self) -> None:
+        """Persist SkillGraph and MemoryPartition to disk."""
+        try:
+            self.skill_graph.save(self._graph_path)
+            self.memory_partition.save(self._partition_path)
+            logger.info("Agent state saved.")
+        except Exception as exc:
+            logger.warning("Failed to save agent state: %s", exc)
+
 
     def run(
         self,
@@ -260,6 +359,9 @@ class MainAgent:
             self.skill_graph, trace, self.memory_partition,
         )
         logger.info("Evolution: %s", evo_log.summary())
+
+        # Phase 5.6: auto-persist graph + partition after evolution
+        self.save_state()
 
         # 7. Reflexion (optional)
         reflection_text = None

@@ -161,6 +161,10 @@ memory/*.json
 !memory/__init__.py
 rag/knowledge_base/*.json
 
+# Skill Graph persistence
+skill_graph/data/*.json
+!skill_graph/data/.gitkeep
+
 # OS-specific files
 .DS_Store
 .DS_Store?

@@ -28,6 +28,17 @@ class Config:
     max_tokens: int = 512
     stop_tokens: list = field(default_factory=lambda: ["\n\n\n", "---"])
 
+    # --- Coding Model (co-processor: Qwen2.5-Coder) ---
+    code_model_path: str = str(PROJECT_ROOT / "models" / "llm" / "qwen2.5-coder-7b-instruct-q4_k_m.gguf")
+    code_n_ctx: int = 8192              # larger context for code tasks
+    code_temperature: float = 0.2       # low randomness for precise code generation
+    code_top_p: float = 0.95
+    code_max_tokens: int = 2048         # code output is typically longer
+    code_stop_tokens: list = field(default_factory=lambda: ["```\n\n", "---"])
+
+    # --- Model Switching ---
+    model_swap_enabled: bool = True     # False → fall back to thinking model only
+
     # --- Embeddings (for RAG / vector store) ---
     embedding_model_name: str = "all-MiniLM-L6-v2"
 
@@ -66,4 +77,11 @@ class Config:
             overrides["n_gpu_layers"] = int(env_gpu)
         if env_temp := os.environ.get("COGARCH_TEMPERATURE"):
             overrides["temperature"] = float(env_temp)
+        # Coding model overrides
+        if env_code_path := os.environ.get("COGARCH_CODE_MODEL_PATH"):
+            overrides["code_model_path"] = env_code_path
+        if env_code_ctx := os.environ.get("COGARCH_CODE_N_CTX"):
+            overrides["code_n_ctx"] = int(env_code_ctx)
+        if env_code_temp := os.environ.get("COGARCH_CODE_TEMPERATURE"):
+            overrides["code_temperature"] = float(env_code_temp)
         return cls(**overrides)
